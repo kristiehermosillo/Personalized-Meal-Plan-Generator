@@ -20,7 +20,7 @@ class Recipe(TypedDict, total=False):
     macros: Macro
     ingredients: List[Ingredient]
 
-def R(name, cuisine, course, tags, cal, p, c, f, ings):
+def R(name, cuisine, course, tags, cal, p, c, f, ings, steps):
     return {
         "name": name,
         "cuisine": cuisine,
@@ -29,7 +29,9 @@ def R(name, cuisine, course, tags, cal, p, c, f, ings):
         "calories": cal,
         "macros": {"protein_g": p, "carbs_g": c, "fat_g": f},
         "ingredients": ings,
+        "steps": steps,
     }
+
 
 RECIPE_DB: List[Recipe] = [
     # Breakfasts
@@ -47,8 +49,15 @@ RECIPE_DB: List[Recipe] = [
       [{"item":"bread","qty":2,"unit":"slices"}, {"item":"avocado","qty":1,"unit":"pc"}, {"item":"lemon","qty":0.25,"unit":"pc"}]),
     R("Protein Smoothie", "american", "breakfast",
       ["gluten-free","dairy-free"], 330, 28, 35, 8,
-      [{"item":"protein powder","qty":1,"unit":"scoop"}, {"item":"banana","qty":1,"unit":"pc"}, {"item":"almond milk","qty":1.5,"unit":"cup"}]),
-    # Lunch
+      [{"item":"protein powder","qty":1,"unit":"scoop"},
+       {"item":"banana","qty":1,"unit":"pc"},
+       {"item":"almond milk","qty":1.5,"unit":"cup"}],
+      steps=[
+          "Add all ingredients to a blender.",
+          "Blend until smooth.",
+          "Serve immediately."
+  ])
+# Lunch
     R("Quinoa Chickpea Bowl", "mediterranean", "lunch",
       ["vegan","gluten-free","dairy-free"], 520, 20, 78, 14,
       [{"item":"quinoa","qty":0.75,"unit":"cup"}, {"item":"chickpeas","qty":1,"unit":"cup"}, {"item":"cucumber","qty":0.5,"unit":"pc"}]),
