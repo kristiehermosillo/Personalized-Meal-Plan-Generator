@@ -18,9 +18,6 @@ import os
 
 load_dotenv()  # this loads the .env file
 
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-
-
 APP_NAME = "MealPlan Genie"
 DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 PREMIUM_FEATURES = [
