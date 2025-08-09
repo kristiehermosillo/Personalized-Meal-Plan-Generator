@@ -20,6 +20,11 @@ load_dotenv()  # this loads the .env file
 
 APP_NAME = "MealPlan Genie"
 DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+# Wake the backend up so it's ready before the user clicks Upgrade
+try:
+    requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=5)
+except Exception:
+    pass
 PREMIUM_FEATURES = [
     "7‑day plan",
     "Calorie target matching",
@@ -87,9 +92,23 @@ with right:
                 st.markdown(f"- {f}")
             if st.button("Upgrade with Stripe", use_container_width=True, type="primary"):
                 try:
-                    r = requests.post(f"{DEFAULT_BACKEND_URL}/create-checkout-session", timeout=45)
-                    r.raise_for_status()
-                    url = r.json().get("checkout_url")
+                    import time
+
+                    url = None
+                    for tries in range(3):
+                        try:
+                            r = requests.post(
+                                f"{DEFAULT_BACKEND_URL}/create-checkout-session",
+                                timeout=45
+                            )
+                            r.raise_for_status()
+                            url = r.json().get("checkout_url")
+                            break
+                        except Exception as e:
+                            if tries == 2:  # on last try, re-raise the error
+                                raise
+                            time.sleep(3)  # wait before retrying
+
                     if url:
                         st.markdown(f"[Click to open Stripe Checkout]({url})")
                     else:
