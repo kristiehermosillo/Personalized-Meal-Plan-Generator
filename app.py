@@ -130,6 +130,14 @@ if not st.session_state.is_premium:
     st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
 # --- Core Logic ---
+def get_day_slots(meals_per_day: int) -> list[str]:
+    if meals_per_day <= 2:
+        return ["Breakfast", "Dinner"]
+    elif meals_per_day == 3:
+        return ["Breakfast", "Lunch", "Dinner"]
+    else:  # 4 meals
+        return ["Breakfast", "Lunch", "Dinner", "Snack"]
+
 def normalize_tokens(s: str) -> List[str]:
     if not s:
         return []
@@ -153,11 +161,12 @@ def recipe_matches(recipe: Recipe, diets: List[str], allergies: List[str], exclu
 
 def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
     """
-    Choose meals by time-of-day:
-    - Breakfast for breakfast slot, Lunch for lunch slot, Dinner for dinner slot.
-    - 'any' recipes can fill any slot as fallback.
-    - Avoid repeats within the same day.
-    - If cal_target provided (premium), aim per-day total by choosing calories close to remaining target.
+    Pick meals by correct course:
+    - Breakfast slot -> 'breakfast' (or 'any')
+    - Lunch slot     -> 'lunch' (or 'any')
+    - Dinner slot    -> 'dinner' (or 'any')
+    - Snack slot     -> 'any' (fallback to anything if empty)
+    Avoid repeats within a day. If cal_target set, nudge daily total toward it.
     """
     import random
     random.seed(42)
@@ -165,26 +174,26 @@ def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target
     # Buckets by course
     buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
     for r in filtered:
-        buckets.get(r.get("course", "any"), buckets["any"]).append(r)
+        buckets.setdefault(r.get("course", "any"), buckets["any"]).append(r)
 
-    # Define the meal slots per day
-    if meals_per_day <= 2:
-        day_slots = ["breakfast", "dinner"]
-    elif meals_per_day == 3:
-        day_slots = ["breakfast", "lunch", "dinner"]
-    else:  # 4 meals (use 'any' as a snack)
-        day_slots = ["breakfast", "lunch", "dinner", "any"]
+    # Slot keys (for filtering) and display names
+    slot_keys = []
+    for name in get_day_slots(meals_per_day):
+        if name == "Breakfast": slot_keys.append("breakfast")
+        elif name == "Lunch":   slot_keys.append("lunch")
+        elif name == "Dinner":  slot_keys.append("dinner")
+        else:                   slot_keys.append("any")  # Snack
 
-    def candidates_for(slot: str) -> List[Recipe]:
+    def candidates_for(slot_key: str) -> List[Recipe]:
         # Prefer exact course, then 'any'
-        seen = set()
+        names = set()
         out = []
-        for r in buckets.get(slot, []):
-            if r["name"] not in seen:
-                out.append(r); seen.add(r["name"])
+        for r in buckets.get(slot_key, []):
+            if r["name"] not in names:
+                out.append(r); names.add(r["name"])
         for r in buckets.get("any", []):
-            if r["name"] not in seen:
-                out.append(r); seen.add(r["name"])
+            if r["name"] not in names:
+                out.append(r); names.add(r["name"])
         return out
 
     plan: Dict[int, List[Recipe]] = {}
@@ -193,18 +202,16 @@ def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target
         meals_today: List[Recipe] = []
         current_cals = 0
 
-        for i, slot in enumerate(day_slots, start=1):
-            cands = [r for r in candidates_for(slot) if r["name"] not in used_today]
-            # Fallback to anything not used today if bucket is empty
+        for i, slot_key in enumerate(slot_keys, start=1):
+            cands = [r for r in candidates_for(slot_key) if r["name"] not in used_today]
             if not cands:
                 cands = [r for r in filtered if r["name"] not in used_today]
             if not cands:
-                continue  # nothing left to place
+                continue
 
-            # Premium: pick calories closest to remaining target
             if cal_target:
-                remaining_slots = len(day_slots) - (i - 1)
-                desired = max(180, int((cal_target - current_cals) / remaining_slots))
+                remaining_slots = len(slot_keys) - (i - 1)
+                desired = max(180, int((cal_target - current_cals) / max(1, remaining_slots)))
                 cands.sort(key=lambda r: abs(r["calories"] - desired))
                 choice = cands[0]
             else:
@@ -218,7 +225,6 @@ def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target
         plan[d] = meals_today
 
     return plan
-
 
     # Category buckets by course to diversify
     buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
@@ -299,13 +305,15 @@ def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
         rows.append({"item": item.title(), "quantity": round(qty, 2), "unit": unit})
     return pd.DataFrame(rows)
 
-def plan_to_dataframe(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
+def plan_to_dataframe(plan: Dict[int, List[Recipe]], meals_per_day: int) -> pd.DataFrame:
     rows = []
-    for d, meals in plan.items():
+    slot_names = get_day_slots(meals_per_day)
+    for day, meals in plan.items():
         for i, r in enumerate(meals, start=1):
+            meal_label = slot_names[i - 1] if i - 1 < len(slot_names) else f"Meal {i}"
             rows.append({
-                "day": d,
-                "meal #": i,
+                "day": day,
+                "meal": meal_label,
                 "recipe": r["name"],
                 "calories": r["calories"],
                 "protein_g": r["macros"]["protein_g"],
@@ -313,6 +321,7 @@ def plan_to_dataframe(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
                 "fat_g": r["macros"]["fat_g"],
             })
     return pd.DataFrame(rows)
+
 
 def generate_pdf(plan_df: pd.DataFrame, shop_df: pd.DataFrame, title: str) -> bytes:
     buffer = BytesIO()
@@ -387,7 +396,7 @@ else:
     with c1:
         st.subheader(f"Your {days}-day plan")
         plan = pick_meals(filtered, meals_per_day, days, st.session_state.calorie_target if st.session_state.is_premium else None)
-        df_plan = plan_to_dataframe(plan)
+        df_plan = plan_to_dataframe(plan, meals_per_day)
         st.dataframe(df_plan, use_container_width=True, hide_index=True)
         # --- Recipe viewing section ---
         st.subheader("View Recipes")
