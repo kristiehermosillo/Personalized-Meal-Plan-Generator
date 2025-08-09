@@ -16,7 +16,6 @@ load_dotenv()  # <-- ADD THIS to load variables from .env
 # SUCCESS_URL = "http://localhost:8501/?session_id={CHECKOUT_SESSION_ID}"
 # CANCEL_URL = "http://localhost:8501/"
 
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 PRICE_ID = os.getenv("PRICE_ID")
 SUCCESS_URL = os.getenv("SUCCESS_URL", "http://127.0.0.1:8501/?session_id={CHECKOUT_SESSION_ID}")
 CANCEL_URL = os.getenv("CANCEL_URL", "http://127.0.0.1:8501/")
