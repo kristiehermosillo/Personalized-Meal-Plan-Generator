@@ -1,0 +1,8 @@
+streamlit>=1.32
+pandas>=2.1
+requests>=2.31
+reportlab>=4.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
+stripe>=7.0
+python-dotenv>=1.0
