@@ -153,15 +153,72 @@ def recipe_matches(recipe: Recipe, diets: List[str], allergies: List[str], exclu
 
 def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
     """
-    Greedy selection:
-    - Shuffle-ish by rotating through categories to avoid repeats
-    - If cal_target provided (premium), aim sum within ±12%
+    Choose meals by time-of-day:
+    - Breakfast for breakfast slot, Lunch for lunch slot, Dinner for dinner slot.
+    - 'any' recipes can fill any slot as fallback.
+    - Avoid repeats within the same day.
+    - If cal_target provided (premium), aim per-day total by choosing calories close to remaining target.
     """
     import random
-    day_plan: Dict[int, List[Recipe]] = {}
-    pool = filtered.copy()
     random.seed(42)
-    random.shuffle(pool)
+
+    # Buckets by course
+    buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
+    for r in filtered:
+        buckets.get(r.get("course", "any"), buckets["any"]).append(r)
+
+    # Define the meal slots per day
+    if meals_per_day <= 2:
+        day_slots = ["breakfast", "dinner"]
+    elif meals_per_day == 3:
+        day_slots = ["breakfast", "lunch", "dinner"]
+    else:  # 4 meals (use 'any' as a snack)
+        day_slots = ["breakfast", "lunch", "dinner", "any"]
+
+    def candidates_for(slot: str) -> List[Recipe]:
+        # Prefer exact course, then 'any'
+        seen = set()
+        out = []
+        for r in buckets.get(slot, []):
+            if r["name"] not in seen:
+                out.append(r); seen.add(r["name"])
+        for r in buckets.get("any", []):
+            if r["name"] not in seen:
+                out.append(r); seen.add(r["name"])
+        return out
+
+    plan: Dict[int, List[Recipe]] = {}
+    for d in range(1, days + 1):
+        used_today = set()
+        meals_today: List[Recipe] = []
+        current_cals = 0
+
+        for i, slot in enumerate(day_slots, start=1):
+            cands = [r for r in candidates_for(slot) if r["name"] not in used_today]
+            # Fallback to anything not used today if bucket is empty
+            if not cands:
+                cands = [r for r in filtered if r["name"] not in used_today]
+            if not cands:
+                continue  # nothing left to place
+
+            # Premium: pick calories closest to remaining target
+            if cal_target:
+                remaining_slots = len(day_slots) - (i - 1)
+                desired = max(180, int((cal_target - current_cals) / remaining_slots))
+                cands.sort(key=lambda r: abs(r["calories"] - desired))
+                choice = cands[0]
+            else:
+                random.shuffle(cands)
+                choice = cands[0]
+
+            meals_today.append(choice)
+            used_today.add(choice["name"])
+            current_cals += choice["calories"]
+
+        plan[d] = meals_today
+
+    return plan
+
 
     # Category buckets by course to diversify
     buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
