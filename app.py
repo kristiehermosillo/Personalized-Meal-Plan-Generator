@@ -294,32 +294,38 @@ def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
     totals: Dict[Tuple[str, str], float] = defaultdict(float)
     for meals in plan.values():
         for rec in meals:
+            if not rec:  # skip empty slots
+                continue
             for ing in rec["ingredients"]:
                 item = ing["item"]
                 qty = ing.get("qty", 1.0)
                 unit = ing.get("unit", "")
                 key = (item.lower(), unit)
                 totals[key] += qty
-    rows = []
-    for (item, unit), qty in sorted(totals.items()):
-        rows.append({"item": item.title(), "quantity": round(qty, 2), "unit": unit})
+    rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
+            for (item, unit), qty in sorted(totals.items())]
     return pd.DataFrame(rows)
+
 
 def plan_to_dataframe(plan: Dict[int, List[Recipe]], meals_per_day: int) -> pd.DataFrame:
     rows = []
     slot_names = get_day_slots(meals_per_day)
     for day, meals in plan.items():
         for i, r in enumerate(meals, start=1):
-            meal_label = slot_names[i - 1] if i - 1 < len(slot_names) else f"Meal {i}"
-            rows.append({
-                "day": day,
-                "meal": meal_label,
-                "recipe": r["name"],
-                "calories": r["calories"],
-                "protein_g": r["macros"]["protein_g"],
-                "carbs_g": r["macros"]["carbs_g"],
-                "fat_g": r["macros"]["fat_g"],
-            })
+            label = slot_names[i - 1] if i - 1 < len(slot_names) else f"Meal {i}"
+            if r is None:
+                rows.append({"day": day, "meal": label, "recipe": "(empty)", "calories": 0,
+                             "protein_g": 0, "carbs_g": 0, "fat_g": 0})
+            else:
+                rows.append({
+                    "day": day,
+                    "meal": label,
+                    "recipe": r["name"],
+                    "calories": r["calories"],
+                    "protein_g": r["macros"]["protein_g"],
+                    "carbs_g": r["macros"]["carbs_g"],
+                    "fat_g": r["macros"]["fat_g"],
+                })
     return pd.DataFrame(rows)
 
 
@@ -396,6 +402,27 @@ else:
     with c1:
         st.subheader(f"Your {days}-day plan")
         plan = pick_meals(filtered, meals_per_day, days, st.session_state.calorie_target if st.session_state.is_premium else None)
+        # Keep filtered recipes & plan in session for swaps/removals
+        if "filtered_recipes" not in st.session_state:
+            st.session_state.filtered_recipes = filtered
+        if "slots" not in st.session_state:
+            st.session_state.slots = get_day_slots(meals_per_day)
+        
+        # Initialize plan only if missing or inputs changed materially
+        regen_needed = (
+            "plan" not in st.session_state
+            or st.session_state.get("meals_per_day_prev") != meals_per_day
+            or st.session_state.get("days_prev") != days
+        )
+        if regen_needed:
+            st.session_state.plan = pick_meals(
+                filtered, meals_per_day, days,
+                st.session_state.calorie_target if st.session_state.is_premium else None
+            )
+            st.session_state.meals_per_day_prev = meals_per_day
+            st.session_state.days_prev = days
+        
+        plan = st.session_state.plan
         df_plan = plan_to_dataframe(plan, meals_per_day)
         st.dataframe(df_plan, use_container_width=True, hide_index=True)
         # --- Recipe viewing section ---
@@ -439,3 +466,60 @@ else:
             st.button("Download PDF (Premium)", disabled=True, help="Upgrade to unlock PDF export")
 
 st.caption("Built with ❤️ in Streamlit. Not medical advice. Consult a professional for clinical nutrition.")
+
+st.markdown("### Edit your plan (Premium)")
+if not st.session_state.is_premium:
+    st.info("Swapping and removing meals is a Premium feature. Upgrade to unlock!")
+else:
+    import random
+
+    # Build course buckets once for fast swaps
+    filtered = st.session_state.filtered_recipes
+    buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
+    for r in filtered:
+        buckets.setdefault(r.get("course", "any"), buckets["any"]).append(r)
+
+    def slot_key_from_label(label: str) -> str:
+        return {"Breakfast": "breakfast", "Lunch": "lunch", "Dinner": "dinner", "Snack": "any"}.get(label, "any")
+
+    def candidates_for(slot_key: str) -> List[Recipe]:
+        # prefer exact course, then 'any'
+        seen = set()
+        out = []
+        for r in buckets.get(slot_key, []):
+            if r["name"] not in seen:
+                out.append(r); seen.add(r["name"])
+        for r in buckets.get("any", []):
+            if r["name"] not in seen:
+                out.append(r); seen.add(r["name"])
+        return out
+
+    slots = st.session_state.slots
+
+    # UI per day
+    for day, meals in plan.items():
+        with st.expander(f"Day {day}"):
+            used_today = {m["name"] for m in meals if m}
+            for idx, current in enumerate(meals):
+                label = slots[idx] if idx < len(slots) else f"Meal {idx+1}"
+                col1, col2, col3 = st.columns([0.5, 0.25, 0.25])
+                with col1:
+                    st.write(f"**{label}** — {current['name'] if current else '(empty)'}")
+                with col2:
+                    if st.button(f"Swap", key=f"swap-{day}-{idx}"):
+                        slot_key = slot_key_from_label(label)
+                        cands = [r for r in candidates_for(slot_key)
+                                 if r and r["name"] not in used_today and (not current or r["name"] != current["name"])]
+                        random.shuffle(cands)
+                        if cands:
+                            choice = cands[0]
+                            st.session_state.plan[day][idx] = choice
+                            used_today.add(choice["name"])
+                            st.rerun()
+                        else:
+                            st.warning("No alternative found for this slot.")
+                with col3:
+                    if st.button("Remove", key=f"remove-{day}-{idx}"):
+                        st.session_state.plan[day][idx] = None
+                        st.rerun()
+
