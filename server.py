@@ -1,42 +1,39 @@
 # server.py
 import os
-from dotenv import load_dotenv  # <-- ADD THIS
-
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import stripe
 
-load_dotenv()  # <-- ADD THIS to load variables from .env
+load_dotenv()  # safe even if you don't use a .env in production
 
+# --- Read env vars ---
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")   # <-- MISSING LINE
+PRICE_ID          = os.getenv("PRICE_ID")
+SUCCESS_URL       = os.getenv("SUCCESS_URL", "http://127.0.0.1:8501/?session_id={CHECKOUT_SESSION_ID}")
+CANCEL_URL        = os.getenv("CANCEL_URL", "http://127.0.0.1:8501/")
 
-# Env vars required:
-# STRIPE_SECRET_KEY = "sk_live_..." or "sk_test_..."
-# PRICE_ID = "price_..." (recurring or one-time)
-# SUCCESS_URL = "http://localhost:8501/?session_id={CHECKOUT_SESSION_ID}"
-# CANCEL_URL = "http://localhost:8501/"
-
-PRICE_ID = os.getenv("PRICE_ID")
-SUCCESS_URL = os.getenv("SUCCESS_URL", "http://127.0.0.1:8501/?session_id={CHECKOUT_SESSION_ID}")
-CANCEL_URL = os.getenv("CANCEL_URL", "http://127.0.0.1:8501/")
-
+# --- Validate ---
 if not STRIPE_SECRET_KEY:
     raise RuntimeError("Missing STRIPE_SECRET_KEY")
 if not PRICE_ID:
     raise RuntimeError("Missing PRICE_ID")
 
+# --- Stripe setup ---
 stripe.api_key = STRIPE_SECRET_KEY
 
+# --- FastAPI app ---
 app = FastAPI(title="MealPlan Genie Backend")
 
-# Allow Streamlit front-end to call us
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten for production
+    allow_origins=["*"],  # tighten later to your Streamlit URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 class CheckoutResponse(BaseModel):
     checkout_url: str
