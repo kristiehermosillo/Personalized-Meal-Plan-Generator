@@ -13,6 +13,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")   # <-- MISSING LINE
 PRICE_ID          = os.getenv("PRICE_ID")
 SUCCESS_URL       = os.getenv("SUCCESS_URL", "http://127.0.0.1:8501/?session_id={CHECKOUT_SESSION_ID}")
 CANCEL_URL        = os.getenv("CANCEL_URL", "http://127.0.0.1:8501/")
+BILLING_MODE = os.getenv("BILLING_MODE", "subscription")  # "payment" or "subscription"
 
 # --- Validate ---
 if not STRIPE_SECRET_KEY:
@@ -42,7 +43,7 @@ class CheckoutResponse(BaseModel):
 def create_checkout_session():
     try:
         session = stripe.checkout.Session.create(
-            mode="payment",                # or "subscription" if PRICE_ID is recurring
+            mode="subscription",                 # <-- set to subscription
             line_items=[{"price": PRICE_ID, "quantity": 1}],
             success_url=SUCCESS_URL,
             cancel_url=CANCEL_URL,
