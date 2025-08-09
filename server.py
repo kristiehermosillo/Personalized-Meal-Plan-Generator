@@ -1,9 +1,14 @@
 # server.py
 import os
+from dotenv import load_dotenv  # <-- ADD THIS
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import stripe
+
+load_dotenv()  # <-- ADD THIS to load variables from .env
+
 
 # Env vars required:
 # STRIPE_SECRET_KEY = "sk_live_..." or "sk_test_..."
