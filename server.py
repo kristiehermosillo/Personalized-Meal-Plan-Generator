@@ -61,3 +61,7 @@ def verify_session(session_id: str):
         return {"paid": bool(paid)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/health")
+def health():
+    return {"ok": True}
