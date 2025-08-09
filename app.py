@@ -58,8 +58,7 @@ def check_stripe_session():
     if not sess_id or sess_id == st.session_state.get("last_session_id"):
         return
     try:
-        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session",
-                         params={"session_id": sess_id}, timeout=10)
+        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session", params={"session_id": sess_id}, timeout=30)
         r.raise_for_status()
         data = r.json()
         if data.get("paid") is True:
@@ -88,7 +87,7 @@ with right:
                 st.markdown(f"- {f}")
             if st.button("Upgrade with Stripe", use_container_width=True, type="primary"):
                 try:
-                    r = requests.post(f"{DEFAULT_BACKEND_URL}/create-checkout-session", timeout=10)
+                    r = requests.post(f"{DEFAULT_BACKEND_URL}/create-checkout-session", timeout=45)
                     r.raise_for_status()
                     url = r.json().get("checkout_url")
                     if url:
