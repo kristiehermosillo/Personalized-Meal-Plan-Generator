@@ -332,15 +332,29 @@ else:
         plan = pick_meals(filtered, meals_per_day, days, st.session_state.calorie_target if st.session_state.is_premium else None)
         df_plan = plan_to_dataframe(plan)
         st.dataframe(df_plan, use_container_width=True, hide_index=True)
-        if st.session_state.is_premium:
-            # Per-day summaries
-            day_summary = df_plan.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]].sum().reset_index()
-            st.markdown("**Daily totals**")
-            st.dataframe(day_summary, use_container_width=True, hide_index=True)
-    with c2:
-        st.subheader("Shopping list")
-        df_shop = consolidate_shopping_list(plan)
-        st.dataframe(df_shop, use_container_width=True, hide_index=True)
+        # --- Recipe viewing section ---
+        st.subheader("View Recipes")
+        for _, row in df_plan.iterrows():
+            recipe_name = row["recipe"]
+            recipe_data = next((r for r in RECIPE_DB if r["name"] == recipe_name), None)
+            if recipe_data:
+                with st.expander(recipe_name):
+                    st.write("**Ingredients:**")
+                    for ing in recipe_data["ingredients"]:
+                        st.write(f"- {ing.get('qty', '')} {ing.get('unit', '')} {ing['item']}")
+                    st.write("**Steps:**")
+                    for i, step in enumerate(recipe_data.get("steps", []), start=1):
+                        st.write(f"{i}. {step}")
+        
+                if st.session_state.is_premium:
+                    # Per-day summaries
+                    day_summary = df_plan.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]].sum().reset_index()
+                    st.markdown("**Daily totals**")
+                    st.dataframe(day_summary, use_container_width=True, hide_index=True)
+            with c2:
+                st.subheader("Shopping list")
+                df_shop = consolidate_shopping_list(plan)
+                st.dataframe(df_shop, use_container_width=True, hide_index=True)
 
     # Downloads
     st.markdown("---")
