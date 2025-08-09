@@ -40,24 +40,26 @@ if "calorie_target" not in st.session_state:
 if "last_session_id" not in st.session_state:
     st.session_state.last_session_id = None
 
-def parse_query_params():
-    query = st.query_params.to_dict()
-    # Streamlit 1.32+ returns a dict-like; fallback:
-    if not query and "?" in st.experimental_get_query_params():
-        query = st.experimental_get_query_params()
-    return query
+# --- Query params (new API only) ---
+def get_session_id_from_url():
+    try:
+        # Streamlit 1.32+ : st.query_params is dict-like
+        qp = dict(st.query_params)
+        sess_id = qp.get("session_id")
+        if isinstance(sess_id, list):
+            sess_id = sess_id[0]
+        return sess_id
+    except Exception:
+        return None
 
 def check_stripe_session():
     """If redirected back from Stripe with session_id, verify it."""
-    qp = parse_query_params()
-    sess_id = qp.get("session_id")
-    if isinstance(sess_id, list):
-        sess_id = sess_id[0]
-    if not sess_id or sess_id == st.session_state.last_session_id:
+    sess_id = get_session_id_from_url()
+    if not sess_id or sess_id == st.session_state.get("last_session_id"):
         return
-    # Verify with backend
     try:
-        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session", params={"session_id": sess_id}, timeout=10)
+        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session",
+                         params={"session_id": sess_id}, timeout=10)
         r.raise_for_status()
         data = r.json()
         if data.get("paid") is True:
