@@ -31,3 +31,7 @@ for r in filtered:
         st.write("**Steps:**")
         for i, step in enumerate(r.get("steps", []), start=1):
             st.write(f"{i}. {step}")
+
+st.markdown("---")
+if st.button("🏠 Back to Home", use_container_width=True):
+    st.switch_page("app.py")
