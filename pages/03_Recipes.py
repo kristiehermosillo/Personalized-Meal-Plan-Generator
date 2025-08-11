@@ -3,7 +3,7 @@ import streamlit as st
 from common import ensure_plan_exists
 from recipe_db import RECIPE_DB
 
-st.set_page_config(page_title="Recipes — MealPlan Genie", page_icon="📖", layout="wide")
+st.set_page_config(page_title="Recipes", page_icon="📖", layout="wide")
 st.title("📖 Recipes")
 
 ensure_plan_exists()
