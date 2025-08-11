@@ -2,7 +2,7 @@
 import streamlit as st
 from common import ensure_plan_exists, plan_to_dataframe, consolidate_shopping_list, get_day_slots
 
-st.set_page_config(page_title="Weekly Overview — MealPlan Genie", page_icon="🗓️", layout="wide")
+st.set_page_config(page_title="Weekly Overview", page_icon="🗓️", layout="wide")
 st.title("🗓️ Weekly Overview")
 
 ensure_plan_exists()
