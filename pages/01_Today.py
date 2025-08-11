@@ -2,7 +2,7 @@
 import streamlit as st
 from common import ensure_plan_exists, get_day_slots, plan_to_dataframe
 
-st.set_page_config(page_title="Today's Meals — MealPlan Genie", page_icon="📅", layout="wide")
+st.set_page_config(page_title="Today", page_icon="📅", layout="wide")
 st.title("📅 Today’s Meals")
 
 ensure_plan_exists()
