@@ -1,96 +1,39 @@
-# app.py
-import os
-import urllib.parse as up
-from typing import List, Dict, Tuple
-import streamlit as st
-import pandas as pd
-import requests
-from io import BytesIO
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-
-from recipe_db import RECIPE_DB, Recipe
-
+# app.py  — Home / Dashboard
+import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
-import os
+from common import (
+    APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
+    RECIPE_DB, Recipe,
+    normalize_tokens, recipe_matches, get_day_slots,
+    pick_meals, pick_meals_ai, plan_to_dataframe
+)
 
-load_dotenv()  # this loads the .env file
-
-APP_NAME = "MealPlan Genie"
-DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
-# Wake the backend up so it's ready before the user clicks Upgrade
-try:
-    requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=5)
-except Exception:
-    pass
-PREMIUM_FEATURES = [
-    "7‑day plan",
-    "Calorie target matching",
-    "Macros per meal & per day",
-    "PDF export",
-]
-
-FREE_DAYS = 3
-PREMIUM_DAYS = 7
-
+load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
 
-# --- OpenRouter (AI planner) ---
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"  # you can change later
+# ---- Session bootstrap ----
+for k, v in {
+    "is_premium": False, "calorie_target": 2000,
+    "last_session_id": None, "used_ai_prev": False
+}.items():
+    st.session_state.setdefault(k, v)
 
-def call_openrouter(messages: list[dict], model: str = OPENROUTER_MODEL, max_tokens: int = 1200) -> dict:
-    api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing OPENROUTER_API_KEY in Streamlit Secrets")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.4,
-        "max_tokens": max_tokens,
-    }
-    resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
-    resp.raise_for_status()
-    return resp.json()
-
-# --- Session bootstrap ---
-if "is_premium" not in st.session_state:
-    st.session_state.is_premium = False
-if "calorie_target" not in st.session_state:
-    st.session_state.calorie_target = 2000
-if "last_session_id" not in st.session_state:
-    st.session_state.last_session_id = None
-
-# --- Query params (new API only) ---
+# ---- Verify Stripe session if redirected back ----
 def get_session_id_from_url():
     try:
-        # Streamlit 1.32+ : st.query_params is dict-like
-        qp = dict(st.query_params)
-        sess_id = qp.get("session_id")
-        if isinstance(sess_id, list):
-            sess_id = sess_id[0]
-        return sess_id
-    except Exception:
-        return None
+        qp = dict(st.query_params); s = qp.get("session_id"); 
+        return s[0] if isinstance(s,list) else s
+    except: return None
 
 def check_stripe_session():
-    """If redirected back from Stripe with session_id, verify it."""
-    sess_id = get_session_id_from_url()
-    if not sess_id or sess_id == st.session_state.get("last_session_id"):
-        return
+    sid = get_session_id_from_url()
+    if not sid or sid == st.session_state.get("last_session_id"): return
     try:
-        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session", params={"session_id": sess_id}, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        if data.get("paid") is True:
+        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session", params={"session_id": sid}, timeout=30)
+        r.raise_for_status(); data = r.json()
+        if data.get("paid"): 
             st.session_state.is_premium = True
-            st.session_state.last_session_id = sess_id
+            st.session_state.last_session_id = sid
             st.success("✅ Premium unlocked! Enjoy the full features.")
         else:
             st.info("Payment not completed yet.")
@@ -99,8 +42,8 @@ def check_stripe_session():
 
 check_stripe_session()
 
-# --- UI: Header ---
-left, right = st.columns([0.75, 0.25])
+# ---- Header ----
+left, right = st.columns([0.70, 0.30])
 with left:
     st.title("🥗 MealPlan Genie")
     st.caption("Fast, tasty weekly plans tailored to your diet. Free 3‑day preview. Upgrade for full power.")
@@ -109,587 +52,72 @@ with right:
         st.success("Premium ✅")
     else:
         with st.popover("Premium 🔓"):
-            st.markdown("**Unlock Premium** to get:")
-            for f in PREMIUM_FEATURES:
-                st.markdown(f"- {f}")
+            st.markdown("**Unlock Premium** to get:\n- 7‑day plan\n- Calorie targeting\n- Macros per day & meal\n- PDF export")
             if st.button("Upgrade with Stripe", use_container_width=True, type="primary"):
-                try:
-                    import time
-
-                    url = None
-                    for tries in range(3):
-                        try:
-                            r = requests.post(
-                                f"{DEFAULT_BACKEND_URL}/create-checkout-session",
-                                timeout=45
-                            )
-                            r.raise_for_status()
-                            url = r.json().get("checkout_url")
-                            break
-                        except Exception as e:
-                            if tries == 2:  # on last try, re-raise the error
-                                raise
-                            time.sleep(3)  # wait before retrying
-
-                    if url:
-                        st.markdown(f"[Click to open Stripe Checkout]({url})")
-                    else:
-                        st.error("No checkout URL returned.")
-                except Exception as e:
-                    st.error(f"Failed to create checkout session: {e}")
+                url = None
+                for tries in range(3):
+                    try:
+                        r = requests.post(f"{DEFAULT_BACKEND_URL}/create-checkout-session", timeout=45)
+                        r.raise_for_status(); url = r.json().get("checkout_url"); break
+                    except Exception as e:
+                        if tries == 2: st.error(f"Failed to create checkout session: {e}"); break
+                        time.sleep(3)
+                if url: st.markdown(f"[Click to open Stripe Checkout]({url})")
 
 st.divider()
 
-# --- Sidebar: Inputs ---
+# ---- Sidebar inputs ----
 st.sidebar.header("Your Preferences")
-diet_flags = st.sidebar.multiselect(
-    "Dietary style",
-    ["vegetarian", "vegan", "gluten-free", "dairy-free", "pescatarian", "low-carb"],
-    default=[]
-)
-allergies = st.sidebar.text_input("Allergies (comma-separated)", value="")
-exclusions = st.sidebar.text_input("Disliked ingredients (comma-separated)", value="")
+diet_flags = st.sidebar.multiselect("Dietary style",
+    ["vegetarian","vegan","gluten-free","dairy-free","pescatarian","low-carb"], default=[])
+allergies  = st.sidebar.text_input("Allergies (comma-separated)", "")
+exclusions = st.sidebar.text_input("Disliked ingredients (comma-separated)", "")
 meals_per_day = st.sidebar.slider("Meals per day", 2, 4, 3)
-
 if st.session_state.is_premium:
-    cal_target = st.sidebar.slider("Daily calorie target", 1200, 3200, st.session_state.calorie_target, step=100)
-    st.session_state.calorie_target = cal_target
+    st.session_state.calorie_target = st.sidebar.slider("Daily calorie target", 1200, 3200, st.session_state.calorie_target, step=100)
 else:
     st.sidebar.info("Calorie targeting available in Premium.")
-
-cuisines = st.sidebar.multiselect(
-    "Cuisine preference (optional)",
-    ["american", "mediterranean", "asian", "mexican", "indian", "middle-eastern", "italian"],
-    default=[]
-)
+cuisines = st.sidebar.multiselect("Cuisine preference (optional)",
+    ["american","mediterranean","asian","mexican","indian","middle-eastern","italian"], default=[])
 
 days = PREMIUM_DAYS if st.session_state.is_premium else FREE_DAYS
+st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
-st.sidebar.markdown("---")
-if not st.session_state.is_premium:
-    st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
-
-# --- Core Logic ---
-def get_day_slots(meals_per_day: int) -> list[str]:
-    if meals_per_day <= 2:
-        return ["Breakfast", "Dinner"]
-    elif meals_per_day == 3:
-        return ["Breakfast", "Lunch", "Dinner"]
-    else:  # 4 meals
-        return ["Breakfast", "Lunch", "Dinner", "Snack"]
-
-def normalize_tokens(s: str) -> List[str]:
-    if not s:
-        return []
-    return [x.strip().lower() for x in s.split(",") if x.strip()]
-
-def recipe_matches(recipe: Recipe, diets: List[str], allergies: List[str], exclusions: List[str], cuisines: List[str]) -> bool:
-    # Diet tags must include all selected diet flags
-    for d in diets:
-        if d not in recipe["diet_tags"]:
-            return False
-    # Allergies/exclusions: reject if any present in ingredients
-    ing_tokens = [i["item"].lower() for i in recipe["ingredients"]]
-    for bad in allergies + exclusions:
-        if any(bad in tok for tok in ing_tokens):
-            return False
-    # Cuisine filter if provided
-    if cuisines:
-        if recipe.get("cuisine") not in cuisines:
-            return False
-    return True
-
-def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
-    """
-    Pick meals by correct course:
-    - Breakfast slot -> 'breakfast' (or 'any')
-    - Lunch slot     -> 'lunch' (or 'any')
-    - Dinner slot    -> 'dinner' (or 'any')
-    - Snack slot     -> 'any' (fallback to anything if empty)
-    Avoid repeats within a day. If cal_target set, nudge daily total toward it.
-    """
-    import random
-    random.seed(42)
-    
-def pick_meals_ai(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
-    """LLM chooses a plan ONLY from filtered recipes. Falls back to pick_meals on error."""
-    import json
-
-    # compact catalog for the prompt
-    catalog = [{"name": r["name"], "course": r.get("course", "any"), "cal": r["calories"]} for r in filtered]
-    slots = get_day_slots(meals_per_day)
-
-    schema = {
-        "type": "object",
-        "properties": {
-            "plan": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "day": {"type": "integer"},
-                        "meals": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "slot": {"type": "string"},
-                                    "recipe_name": {"type": "string"}
-                                },
-                                "required": ["slot", "recipe_name"]
-                            }
-                        }
-                    },
-                    "required": ["day", "meals"]
-                }
-            }
-        },
-        "required": ["plan"]
-    }
-
-    sys = (
-        "Select a weekly meal plan strictly from the provided recipe catalog. "
-        "Respect time-of-day slots (Breakfast->breakfast, Lunch->lunch, Dinner->dinner; Snack->any). "
-        "Do NOT invent recipe names. Avoid repeating the same recipe within a day. "
-        "If a calorie target is provided, aim the daily total near it."
-    )
-    user_payload = {
-        "catalog": catalog,
-        "days": days,
-        "slots_per_day": slots,
-        "daily_calorie_target": cal_target,
-        "rules": [
-            "Only choose recipe_name from catalog.name",
-            "Breakfast must be course 'breakfast' or 'any' (similar for Lunch/Dinner)",
-            "If target is None, prioritize variety"
-        ],
-        "return_json_schema": schema
-    }
-
-    messages = [
-        {"role": "system", "content": sys},
-        {"role": "user", "content": f"Return ONLY JSON matching this schema:\n{json.dumps(schema)}\n\nInput:\n{json.dumps(user_payload)}"}
-    ]
-
-    try:
-        data = call_openrouter(messages)
-        text = data["choices"][0]["message"]["content"].strip()
-        # remove code fences if present
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-        parsed = json.loads(text)
-
-        name_to_recipe = {r["name"]: r for r in filtered}
-        plan: Dict[int, List[Recipe]] = {}
-        for day_block in parsed.get("plan", []):
-            d = int(day_block["day"])
-            meals: List[Recipe] = []
-            for m in day_block["meals"]:
-                rec = name_to_recipe.get(m["recipe_name"])
-                if rec:
-                    meals.append(rec)
-            plan[d] = meals
-
-        if not plan:
-            return pick_meals(filtered, meals_per_day, days, cal_target)
-        return plan
-    except Exception as e:
-        st.warning(f"AI planner failed; using default. Reason: {e}")
-        return pick_meals(filtered, meals_per_day, days, cal_target)
-
-    # Buckets by course
-    buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
-    for r in filtered:
-        buckets.setdefault(r.get("course", "any"), buckets["any"]).append(r)
-
-    # Slot keys (for filtering) and display names
-    slot_keys = []
-    for name in get_day_slots(meals_per_day):
-        if name == "Breakfast": slot_keys.append("breakfast")
-        elif name == "Lunch":   slot_keys.append("lunch")
-        elif name == "Dinner":  slot_keys.append("dinner")
-        else:                   slot_keys.append("any")  # Snack
-
-    def candidates_for(slot_key: str) -> List[Recipe]:
-        # Prefer exact course, then 'any'
-        names = set()
-        out = []
-        for r in buckets.get(slot_key, []):
-            if r["name"] not in names:
-                out.append(r); names.add(r["name"])
-        for r in buckets.get("any", []):
-            if r["name"] not in names:
-                out.append(r); names.add(r["name"])
-        return out
-
-    plan: Dict[int, List[Recipe]] = {}
-    for d in range(1, days + 1):
-        used_today = set()
-        meals_today: List[Recipe] = []
-        current_cals = 0
-
-        for i, slot_key in enumerate(slot_keys, start=1):
-            cands = [r for r in candidates_for(slot_key) if r["name"] not in used_today]
-            if not cands:
-                cands = [r for r in filtered if r["name"] not in used_today]
-            if not cands:
-                continue
-
-            if cal_target:
-                remaining_slots = len(slot_keys) - (i - 1)
-                desired = max(180, int((cal_target - current_cals) / max(1, remaining_slots)))
-                cands.sort(key=lambda r: abs(r["calories"] - desired))
-                choice = cands[0]
-            else:
-                random.shuffle(cands)
-                choice = cands[0]
-
-            meals_today.append(choice)
-            used_today.add(choice["name"])
-            current_cals += choice["calories"]
-
-        plan[d] = meals_today
-
-    return plan
-
-def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
-    from collections import defaultdict
-    totals: Dict[Tuple[str, str], float] = defaultdict(float)
-    for meals in plan.values():
-        for rec in meals:
-            if not rec:  # skip empty slots
-                continue
-            for ing in rec["ingredients"]:
-                item = ing["item"]
-                qty = ing.get("qty", 1.0)
-                unit = ing.get("unit", "")
-                key = (item.lower(), unit)
-                totals[key] += qty
-    rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
-            for (item, unit), qty in sorted(totals.items())]
-    return pd.DataFrame(rows)
-
-
-def plan_to_dataframe(plan: Dict[int, List[Recipe]], meals_per_day: int) -> pd.DataFrame:
-    rows = []
-    slot_names = get_day_slots(meals_per_day)
-    for day, meals in plan.items():
-        for i, r in enumerate(meals, start=1):
-            label = slot_names[i - 1] if i - 1 < len(slot_names) else f"Meal {i}"
-            if r is None:
-                rows.append({"day": day, "meal": label, "recipe": "(empty)", "calories": 0,
-                             "protein_g": 0, "carbs_g": 0, "fat_g": 0})
-            else:
-                rows.append({
-                    "day": day,
-                    "meal": label,
-                    "recipe": r["name"],
-                    "calories": r["calories"],
-                    "protein_g": r["macros"]["protein_g"],
-                    "carbs_g": r["macros"]["carbs_g"],
-                    "fat_g": r["macros"]["fat_g"],
-                })
-    return pd.DataFrame(rows)
-
-
-def generate_pdf(plan_df: pd.DataFrame, shop_df: pd.DataFrame, title: str) -> bytes:
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-
-    def header(text):
-        c.setFont("Helvetica-Bold", 16)
-        c.setFillColor(colors.darkgreen)
-        c.drawString(1 * inch, height - 1 * inch, text)
-        c.setFillColor(colors.black)
-
-    def table(df: pd.DataFrame, start_y: float, max_rows: int = 28, col_sizes: List[float] | None = None):
-        x = 0.8 * inch
-        y = start_y
-        c.setFont("Helvetica", 9)
-        cols = list(df.columns)
-        if not col_sizes:
-            total_w = width - 1.6 * inch
-            col_sizes = [total_w / len(cols)] * len(cols)
-        # header
-        c.setFont("Helvetica-Bold", 9)
-        for i, col in enumerate(cols):
-            c.drawString(x + sum(col_sizes[:i]) + 2, y, str(col))
-        c.setFont("Helvetica", 9)
-        y -= 14
-        rows_drawn = 0
-        for _, row in df.iterrows():
-            if rows_drawn >= max_rows or y < 1 * inch:
-                c.showPage()
-                y = height - 1 * inch
-                # redraw header
-                c.setFont("Helvetica-Bold", 9)
-                for i, col in enumerate(cols):
-                    c.drawString(x + sum(col_sizes[:i]) + 2, y, str(col))
-                c.setFont("Helvetica", 9)
-                y -= 14
-                rows_drawn = 0
-            for i, col in enumerate(cols):
-                c.drawString(x + sum(col_sizes[:i]) + 2, y, str(row[col]))
-            y -= 12
-            rows_drawn += 1
-        return y
-
-    # Page 1: Plan
-    header(title)
-    c.setFont("Helvetica", 11)
-    c.drawString(1 * inch, height - 1.3 * inch, "Weekly Meal Plan")
-    plan_small = plan_df.copy()
-    plan_small["recipe"] = plan_small["recipe"].str.slice(0, 30)
-    y = height - 1.55 * inch
-    table(plan_small, y)
-
-    c.showPage()
-    # Page 2: Shopping list
-    header("Shopping List")
-    y2 = height - 1.3 * inch
-    shop_small = shop_df.rename(columns={"item": "Item", "quantity": "Qty", "unit": "Unit"})
-    table(shop_small, y2)
-    c.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-def pick_meals_ai(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
-    """
-    Ask an LLM to build a weekly plan by selecting ONLY from the provided recipe list.
-    Returns same structure as pick_meals().
-    """
-    import json, math
-
-    # Build compact catalog grouped by course for the prompt
-    def brief(r: Recipe):
-        return {"name": r["name"], "course": r.get("course", "any"), "cal": r["calories"]}
-
-    catalog = [brief(r) for r in filtered]
-    slots = get_day_slots(meals_per_day)
-    # JSON schema we expect back
-    schema = {
-        "type": "object",
-        "properties": {
-            "plan": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "day": {"type": "integer"},
-                        "meals": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "slot": {"type": "string"},   # Breakfast/Lunch/Dinner/Snack
-                                    "recipe_name": {"type": "string"}
-                                },
-                                "required": ["slot", "recipe_name"]
-                            }
-                        }
-                    },
-                    "required": ["day", "meals"]
-                }
-            }
-        },
-        "required": ["plan"]
-    }
-
-    sys = (
-        "You are a nutrition-savvy planner. Select a weekly plan strictly from the provided recipes. "
-        "Respect course slots (Breakfast→breakfast, Lunch→lunch, Dinner→dinner, Snack→any). "
-        "Do not invent names. Aim the daily total near the calorie target if provided. "
-        "Avoid repeating the same recipe on a single day."
-    )
-    user = {
-        "catalog": catalog,
-        "days": days,
-        "slots_per_day": slots,
-        "daily_calorie_target": cal_target,
-        "rules": [
-            "Only pick recipe_name from catalog.name",
-            "Breakfast picks must have course=='breakfast' or 'any' (similar for Lunch/Dinner)",
-            "If target is None, just balance variety"
-        ],
-        "return_json_schema": schema
-    }
-
-    messages = [
-        {"role": "system", "content": sys},
-        {"role": "user", "content": f"Create a plan. Respond ONLY with JSON matching this schema:\n{json.dumps(schema)}\n\nInput:\n{json.dumps(user)}"}
-    ]
-
-    try:
-        data = call_openrouter(messages)
-        text = data["choices"][0]["message"]["content"]
-        # Some models wrap JSON in code fences
-        text = text.strip().strip("`")
-        if text.startswith("json"):
-            text = text[4:].strip()
-        parsed = json.loads(text)
-        # Convert to our internal structure: Dict[int, List[Recipe]]
-        plan: Dict[int, List[Recipe]] = {}
-        name_to_recipe = {r["name"]: r for r in filtered}
-        for day_block in parsed.get("plan", []):
-            d = int(day_block["day"])
-            meals: List[Recipe] = []
-            for meal in day_block["meals"]:
-                rec = name_to_recipe.get(meal["recipe_name"])
-                if rec:
-                    meals.append(rec)
-            plan[d] = meals
-        # Fallback if nothing came back
-        if not plan:
-            return pick_meals(filtered, meals_per_day, days, cal_target)
-        return plan
-    except Exception as e:
-        st.warning(f"AI planner failed, using default: {e}")
-        return pick_meals(filtered, meals_per_day, days, cal_target)
-
-# --- Action: Generate Plan ---
-excl = normalize_tokens(exclusions) + normalize_tokens(allergies)
-filtered = [r for r in RECIPE_DB if recipe_matches(r, diet_flags, normalize_tokens(allergies), normalize_tokens(exclusions), cuisines)]
+# ---- Filter recipes ----
+filtered = [r for r in RECIPE_DB if recipe_matches(
+    r, diet_flags, normalize_tokens(allergies), normalize_tokens(exclusions), cuisines
+)]
 
 if not filtered:
     st.warning("No recipes match your filters. Try removing some restrictions 🤔")
-else:
-    c1, c2 = st.columns([0.6, 0.4])
-    with c1:
-        st.subheader(f"Your {days}-day plan")
+    st.stop()
 
-        # Toggle to use AI (Premium only)
-        use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True)
-        
-        # Initialize session holders
-        if "filtered_recipes" not in st.session_state:
-            st.session_state.filtered_recipes = filtered
-        if "slots" not in st.session_state:
-            st.session_state.slots = get_day_slots(meals_per_day)
-        
-        regen_needed = (
-            "plan" not in st.session_state
-            or st.session_state.get("meals_per_day_prev") != meals_per_day
-            or st.session_state.get("days_prev") != days
-            or st.session_state.get("used_ai_prev") != bool(use_ai)
-        )
-        
-        if regen_needed:
-            generator = pick_meals_ai if use_ai else pick_meals
-            st.session_state.plan = generator(
-                filtered, meals_per_day, days,
-                st.session_state.calorie_target if st.session_state.is_premium else None
-            )
-            st.session_state.meals_per_day_prev = meals_per_day
-            st.session_state.days_prev = days
-            st.session_state.used_ai_prev = bool(use_ai)
-        
-        plan = st.session_state.plan
+# ---- Plan generation (with AI toggle) ----
+st.subheader(f"Your {days}-day plan")
+use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True)
 
-        df_plan = plan_to_dataframe(plan, meals_per_day)
-        st.dataframe(df_plan, use_container_width=True, hide_index=True)
-        # --- Recipe viewing section ---
-        st.subheader("View Recipes")
-        for _, row in df_plan.iterrows():
-            recipe_name = row["recipe"]
-            recipe_data = next((r for r in RECIPE_DB if r["name"] == recipe_name), None)
-            if recipe_data:
-                with st.expander(recipe_name):
-                    st.write("**Ingredients:**")
-                    for ing in recipe_data["ingredients"]:
-                        st.write(f"- {ing.get('qty', '')} {ing.get('unit', '')} {ing['item']}")
-                    st.write("**Steps:**")
-                    for i, step in enumerate(recipe_data.get("steps", []), start=1):
-                        st.write(f"{i}. {step}")
-        
-        # ⬇️ show daily totals ONCE (not in the loop)
-        if st.session_state.is_premium:
-            day_summary = (
-                df_plan.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]]
-                .sum()
-                .reset_index()
-            )
-            st.markdown("**Daily totals**")
-            st.dataframe(day_summary, use_container_width=True, hide_index=True)
-        
-        # ⬇️ shopping list ONCE (not in the loop)
-        with c2:
-            st.subheader("Shopping list")
-            df_shop = consolidate_shopping_list(plan)
-            st.dataframe(df_shop, use_container_width=True, hide_index=True)
+regen_needed = (
+    "plan" not in st.session_state
+    or st.session_state.get("meals_per_day_prev") != meals_per_day
+    or st.session_state.get("days_prev") != days
+    or st.session_state.get("used_ai_prev") != bool(use_ai)
+    or st.session_state.get("filters_hash") != hash(tuple(sorted([*diet_flags,*cuisines,*normalize_tokens(allergies),*normalize_tokens(exclusions)])))
+)
 
+if regen_needed:
+    generator = pick_meals_ai if use_ai else pick_meals
+    st.session_state.plan = generator(
+        filtered, meals_per_day, days,
+        st.session_state.calorie_target if st.session_state.is_premium else None
+    )
+    st.session_state.meals_per_day_prev = meals_per_day
+    st.session_state.days_prev = days
+    st.session_state.used_ai_prev = bool(use_ai)
+    st.session_state.filters_hash = hash(tuple(sorted([*diet_flags,*cuisines,*normalize_tokens(allergies),*normalize_tokens(exclusions)])))
 
-    # Downloads
-    st.markdown("---")
-    dl1, dl2, dl3 = st.columns(3)
-    with dl1:
-        csv_plan = df_plan.to_csv(index=False).encode()
-        st.download_button("Download Plan (CSV)", data=csv_plan, file_name="mealplan.csv", mime="text/csv")
-    with dl2:
-        csv_shop = df_shop.to_csv(index=False).encode()
-        st.download_button("Download Shopping List (CSV)", data=csv_shop, file_name="shopping_list.csv", mime="text/csv")
-    with dl3:
-        if st.session_state.is_premium:
-            pdf_bytes = generate_pdf(df_plan, df_shop, f"{APP_NAME} — Personalized Plan")
-            st.download_button("Download PDF (Premium)", data=pdf_bytes, file_name="mealplan.pdf", mime="application/pdf")
-        else:
-            st.button("Download PDF (Premium)", disabled=True, help="Upgrade to unlock PDF export")
+plan = st.session_state.plan
+df_plan = plan_to_dataframe(plan, meals_per_day)
 
-st.caption("Built with ❤️ in Streamlit. Not medical advice. Consult a professional for clinical nutrition.")
-
-st.markdown("### Edit your plan (Premium)")
-if not st.session_state.is_premium:
-    st.info("Swapping and removing meals is a Premium feature. Upgrade to unlock!")
-else:
-    import random
-
-    # Build course buckets once for fast swaps
-    filtered = st.session_state.filtered_recipes
-    buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
-    for r in filtered:
-        buckets.setdefault(r.get("course", "any"), buckets["any"]).append(r)
-
-    def slot_key_from_label(label: str) -> str:
-        return {"Breakfast": "breakfast", "Lunch": "lunch", "Dinner": "dinner", "Snack": "any"}.get(label, "any")
-
-    def candidates_for(slot_key: str) -> List[Recipe]:
-        # prefer exact course, then 'any'
-        seen = set()
-        out = []
-        for r in buckets.get(slot_key, []):
-            if r["name"] not in seen:
-                out.append(r); seen.add(r["name"])
-        for r in buckets.get("any", []):
-            if r["name"] not in seen:
-                out.append(r); seen.add(r["name"])
-        return out
-
-    slots = st.session_state.slots
-
-    # UI per day
-    for day, meals in plan.items():
-        with st.expander(f"Day {day}"):
-            used_today = {m["name"] for m in meals if m}
-            for idx, current in enumerate(meals):
-                label = slots[idx] if idx < len(slots) else f"Meal {idx+1}"
-                col1, col2, col3 = st.columns([0.5, 0.25, 0.25])
-                with col1:
-                    st.write(f"**{label}** — {current['name'] if current else '(empty)'}")
-                with col2:
-                    if st.button(f"Swap", key=f"swap-{day}-{idx}"):
-                        slot_key = slot_key_from_label(label)
-                        cands = [r for r in candidates_for(slot_key)
-                                 if r and r["name"] not in used_today and (not current or r["name"] != current["name"])]
-                        random.shuffle(cands)
-                        if cands:
-                            choice = cands[0]
-                            st.session_state.plan[day][idx] = choice
-                            used_today.add(choice["name"])
-                            st.rerun()
-                        else:
-                            st.warning("No alternative found for this slot.")
-                with col3:
-                    if st.button("Remove", key=f"remove-{day}-{idx}"):
-                        st.session_state.plan[day][idx] = None
-                        st.rerun()
-
+# Quick peek (Home keeps it simple)
+st.dataframe(df_plan, use_container_width=True, hide_index=True)
+st.info("Use the pages in the left sidebar for **Today**, **Weekly Overview**, and **Recipes**.")
