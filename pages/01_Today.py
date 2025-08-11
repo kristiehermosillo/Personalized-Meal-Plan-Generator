@@ -27,3 +27,7 @@ for i, r in enumerate(meals, start=1):
         st.write("**Steps:**")
         for idx, step in enumerate(r.get("steps", []), start=1):
             st.write(f"{idx}. {step}")
+
+st.markdown("---")
+if st.button("🏠 Back to Home", use_container_width=True):
+    st.switch_page("app.py")
