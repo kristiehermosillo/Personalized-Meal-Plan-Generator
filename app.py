@@ -26,19 +26,36 @@ def get_session_id_from_url():
     except: return None
 
 def check_stripe_session():
-    sid = get_session_id_from_url()
-    if not sid or sid == st.session_state.get("last_session_id"): return
-    try:
-        r = requests.get(f"{DEFAULT_BACKEND_URL}/verify-session", params={"session_id": sid}, timeout=30)
-        r.raise_for_status(); data = r.json()
-        if data.get("paid"): 
-            st.session_state.is_premium = True
-            st.session_state.last_session_id = sid
-            st.success("✅ Premium unlocked! Enjoy the full features.")
-        else:
-            st.info("Payment not completed yet.")
-    except Exception as e:
-        st.warning(f"Could not verify payment: {e}")
+    """If redirected back from Stripe with session_id, verify it (with retries)."""
+    sess_id = get_session_id_from_url()
+    if not sess_id or sess_id == st.session_state.get("last_session_id"):
+        return
+    import time
+    last_err = None
+    for _ in range(3):  # 3 tries
+        try:
+            r = requests.get(
+                f"{DEFAULT_BACKEND_URL}/verify-session",
+                params={"session_id": sess_id},
+                timeout=20,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if data.get("paid"):
+                st.session_state.is_premium = True
+                st.session_state.last_session_id = sess_id
+                st.success("✅ Premium unlocked! Enjoy the full features.")
+                return
+            else:
+                st.info("Payment not completed yet.")
+                return
+        except Exception as e:
+            last_err = e
+            time.sleep(2)
+    st.warning(f"Could not verify payment (server waking up). Please try again. Details: {last_err}")
+    # Optional manual retry button
+    if st.button("🔁 Retry verification", use_container_width=True):
+        st.rerun()
 
 check_stripe_session()
 
