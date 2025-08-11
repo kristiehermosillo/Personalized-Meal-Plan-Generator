@@ -128,8 +128,7 @@ c1, c2, c3 = st.columns(3)
 
 with c1:
     if st.button("📅 Today", use_container_width=True):
-        # try by display name first (most reliable)
-        st.switch_page("Today")
+        st.switch_page("Today")  # use display name
 
 with c2:
     if st.button("🗓️ Weekly Overview", use_container_width=True):
