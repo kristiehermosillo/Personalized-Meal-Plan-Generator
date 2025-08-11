@@ -124,22 +124,19 @@ st.info("Use the pages in the left sidebar for **Today**, **Weekly Overview**, a
 
 st.markdown("### Quick navigation")
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 
 with c1:
-    if st.button("🏠 Home / Dashboard", use_container_width=True):
-        st.switch_page("app.py")  # main page
-
-with c2:
     if st.button("📅 Today", use_container_width=True):
         st.switch_page("pages/01_Today.py")
 
-with c3:
+with c2:
     if st.button("🗓️ Weekly Overview", use_container_width=True):
         st.switch_page("pages/02_Weekly_Overview.py")
 
-with c4:
+with c3:
     if st.button("📖 Recipes", use_container_width=True):
         st.switch_page("pages/03_Recipes.py")
+
 
 
