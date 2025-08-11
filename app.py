@@ -140,4 +140,9 @@ with c3:
         st.switch_page("Recipes")
 
 
+with st.expander("Debug: pages folder"):
+    import os
+    st.write(os.getcwd())
+    st.write(os.listdir())          # should include 'pages'
+    st.write(os.listdir("pages"))   # should list 01_Today.py, 02_Weekly_Overview.py, 03_Recipes.py
 
