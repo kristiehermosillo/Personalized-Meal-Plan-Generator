@@ -25,3 +25,7 @@ with c2:
     st.dataframe(df_shop, use_container_width=True, hide_index=True)
 
 # Downloads (CSV/PDF from Home if you want; or re-add here)
+
+st.markdown("---")
+if st.button("🏠 Back to Home", use_container_width=True):
+    st.switch_page("app.py")
