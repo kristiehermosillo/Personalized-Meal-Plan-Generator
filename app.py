@@ -244,69 +244,6 @@ def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target
 
     return plan
 
-    # Category buckets by course to diversify
-    buckets: Dict[str, List[Recipe]] = {"breakfast": [], "lunch": [], "dinner": [], "any": []}
-    for r in pool:
-        buckets.get(r.get("course", "any"), buckets["any"]).append(r)
-
-    def next_meal(prev_used: set) -> Recipe | None:
-        # try rotating through buckets
-        for key in ["breakfast", "lunch", "dinner", "any"]:
-            random.shuffle(buckets[key])
-            for r in buckets[key]:
-                if r["name"] in prev_used:
-                    continue
-                return r
-        return None
-
-    for d in range(1, days + 1):
-        used = set()
-        meals: List[Recipe] = []
-        attempts = 0
-        while len(meals) < meals_per_day and attempts < 200:
-            r = next_meal(used)
-            if not r:
-                break
-            if cal_target and len(meals) == meals_per_day - 1:
-                # try to choose a last meal that nudges calories toward target
-                current = sum(m["calories"] for m in meals)
-                target_remaining = cal_target - current
-                # find candidate closest to target_remaining / remaining_meals
-                remaining = meals_per_day - len(meals)
-                desired = max(200, int(target_remaining / remaining))
-                candidates = sorted(pool, key=lambda x: abs(x["calories"] - desired))
-                for c in candidates:
-                    if c["name"] not in used:
-                        r = c
-                        break
-            meals.append(r)
-            used.add(r["name"])
-            attempts += 1
-
-        # Premium: ensure total within band, otherwise simple greedy adjust
-        if cal_target:
-            total = sum(m["calories"] for m in meals)
-            band_low, band_high = int(cal_target * 0.88), int(cal_target * 1.12)
-            tweak_rounds = 0
-            while (total < band_low or total > band_high) and tweak_rounds < 50:
-                # try replacing a random meal with a closer calorie option
-                idx = random.randrange(0, len(meals))
-                current = meals[idx]
-                diff = cal_target - total
-                desired = max(180, current["calories"] + diff // 2)
-                candidates = sorted(pool, key=lambda x: abs(x["calories"] - desired))
-                for c in candidates:
-                    if c["name"] not in used:
-                        used.remove(current["name"])
-                        meals[idx] = c
-                        used.add(c["name"])
-                        break
-                total = sum(m["calories"] for m in meals)
-                tweak_rounds += 1
-
-        day_plan[d] = meals
-    return day_plan
-
 def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
     from collections import defaultdict
     totals: Dict[Tuple[str, str], float] = defaultdict(float)
@@ -457,15 +394,22 @@ else:
                     for i, step in enumerate(recipe_data.get("steps", []), start=1):
                         st.write(f"{i}. {step}")
         
-                if st.session_state.is_premium:
-                    # Per-day summaries
-                    day_summary = df_plan.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]].sum().reset_index()
-                    st.markdown("**Daily totals**")
-                    st.dataframe(day_summary, use_container_width=True, hide_index=True)
-            with c2:
-                st.subheader("Shopping list")
-                df_shop = consolidate_shopping_list(plan)
-                st.dataframe(df_shop, use_container_width=True, hide_index=True)
+        # ⬇️ show daily totals ONCE (not in the loop)
+        if st.session_state.is_premium:
+            day_summary = (
+                df_plan.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]]
+                .sum()
+                .reset_index()
+            )
+            st.markdown("**Daily totals**")
+            st.dataframe(day_summary, use_container_width=True, hide_index=True)
+        
+        # ⬇️ shopping list ONCE (not in the loop)
+        with c2:
+            st.subheader("Shopping list")
+            df_shop = consolidate_shopping_list(plan)
+            st.dataframe(df_shop, use_container_width=True, hide_index=True)
+
 
     # Downloads
     st.markdown("---")
