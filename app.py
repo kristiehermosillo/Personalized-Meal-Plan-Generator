@@ -123,7 +123,8 @@ st.dataframe(df_plan, use_container_width=True, hide_index=True)
 st.info("Use the pages in the left sidebar for **Today**, **Weekly Overview**, and **Recipes**.")
 
 st.markdown("### Quick navigation")
-st.page_link("app.py", label="🏠 Home / Dashboard")
-st.page_link("pages/01_Today.py", label="📅 Today")
-st.page_link("pages/02_Weekly_Overview.py", label="🗓️ Weekly Overview")
-st.page_link("pages/03_Recipes.py", label="📖 Recipes")
+st.page_link("Home", label="🏠 Home / Dashboard")
+st.page_link("Today", label="📅 Today")
+st.page_link("Weekly Overview", label="🗓️ Weekly Overview")
+st.page_link("Recipes", label="📖 Recipes")
+
