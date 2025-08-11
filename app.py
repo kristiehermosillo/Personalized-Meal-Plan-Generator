@@ -122,26 +122,20 @@ df_plan = plan_to_dataframe(plan, meals_per_day)
 st.dataframe(df_plan, use_container_width=True, hide_index=True)
 st.info("Use the pages in the left sidebar for **Today**, **Weekly Overview**, and **Recipes**.")
 
+import urllib.parse as _up
+
 st.markdown("### Quick navigation")
 
-c1, c2, c3 = st.columns(3)
+def _link(label, page_name):
+    href = f"?page={_up.quote(page_name)}"
+    st.markdown(f"[{label}]({href})")
 
-with c1:
-    if st.button("📅 Today", use_container_width=True):
-        st.switch_page("Today")  # use display name
+cols = st.columns(3)
+with cols[0]:
+    _link("📅 Today", "Today")
+with cols[1]:
+    _link("🗓️ Weekly Overview", "Weekly Overview")
+with cols[2]:
+    _link("📖 Recipes", "Recipes")
 
-with c2:
-    if st.button("🗓️ Weekly Overview", use_container_width=True):
-        st.switch_page("Weekly Overview")
-
-with c3:
-    if st.button("📖 Recipes", use_container_width=True):
-        st.switch_page("Recipes")
-
-
-with st.expander("Debug: pages folder"):
-    import os
-    st.write(os.getcwd())
-    st.write(os.listdir())          # should include 'pages'
-    st.write(os.listdir("pages"))   # should list 01_Today.py, 02_Weekly_Overview.py, 03_Recipes.py
 
