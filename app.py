@@ -109,6 +109,20 @@ view = st.sidebar.radio(
 
 st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
+st.sidebar.markdown("### Pantry (optional)")
+pantry_text = st.sidebar.text_area(
+    "Items you already have (comma or new line separated)",
+    value=st.session_state.get("pantry_text", ""),
+    placeholder="rice, olive oil\nbananas",
+    height=120,
+)
+st.session_state["pantry_text"] = pantry_text
+show_pantry_note = st.sidebar.checkbox(
+    "Keep pantry items in list (annotate instead of removing)",
+    value=False,
+    help="If checked, pantry items also appear in the main list so you can mark them '(have)'",
+)
+
 # ---- Filter recipes ----
 filtered = [r for r in RECIPE_DB if recipe_matches(
     r, diet_flags, normalize_tokens(allergies), normalize_tokens(exclusions), cuisines
@@ -185,8 +199,11 @@ if view == "Today":
 elif view == "Weekly Overview":
     st.subheader("🗓️ Weekly Overview")
 
+    from common import plan_to_dataframe, consolidate_shopping_list, parse_pantry_text, split_shopping_by_pantry
+
     df_plan2 = plan_to_dataframe(plan, meals_per_day)
     c1, c2 = st.columns([0.6, 0.4])
+
     with c1:
         st.dataframe(df_plan2, use_container_width=True, hide_index=True)
         if st.session_state.is_premium:
@@ -197,10 +214,34 @@ elif view == "Weekly Overview":
             )
             st.markdown("**Daily totals**")
             st.dataframe(day_summary, use_container_width=True, hide_index=True)
+
+    # Pantry-aware shopping list
     with c2:
-        st.markdown("**Shopping list**")
+        st.markdown("**Shopping list (need to buy)**")
         df_shop2 = consolidate_shopping_list(plan)
-        st.dataframe(df_shop2, use_container_width=True, hide_index=True)
+
+        pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
+        need_df, have_df = split_shopping_by_pantry(
+            df_shop2,
+            pantry_items,
+            annotate_at_bottom=show_pantry_note,
+        )
+
+        # Optional annotation if keeping pantry items in main list
+        if show_pantry_note and not need_df.empty and not have_df.empty:
+            have_norm = set(str(x).lower() for x in have_df["item"].astype(str))
+            def _annot(row):
+                nm = str(row["item"]).lower()
+                return f"{row['item']} (have)" if nm in have_norm else row["item"]
+            need_df = need_df.copy()
+            need_df["item"] = need_df.apply(_annot, axis=1)
+
+        st.dataframe(need_df, use_container_width=True, hide_index=True)
+        st.markdown("**Pantry (already have)**")
+        if have_df.empty:
+            st.caption("No matches with your pantry.")
+        else:
+            st.dataframe(have_df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     dl1, dl2 = st.columns(2)
@@ -212,13 +253,19 @@ elif view == "Weekly Overview":
             mime="text/csv",
         )
     with dl2:
-        df_shop2 = consolidate_shopping_list(plan)
         st.download_button(
-            "Download Shopping List (CSV)",
-            data=df_shop2.to_csv(index=False).encode(),
-            file_name="shopping_list.csv",
+            "Download Needed (CSV)",
+            data=need_df.to_csv(index=False).encode(),
+            file_name="shopping_list_needed.csv",
             mime="text/csv",
         )
+        st.download_button(
+            "Download Pantry (CSV)",
+            data=have_df.to_csv(index=False).encode(),
+            file_name="shopping_list_pantry.csv",
+            mime="text/csv",
+        )
+
 
 elif view == "Recipes":
     st.subheader("📖 Recipes in this plan")
