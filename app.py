@@ -98,6 +98,15 @@ cuisines = st.sidebar.multiselect("Cuisine preference (optional)",
     ["american","mediterranean","asian","mexican","indian","middle-eastern","italian"], default=[])
 
 days = PREMIUM_DAYS if st.session_state.is_premium else FREE_DAYS
+
+st.sidebar.markdown("### Navigation")
+view = st.sidebar.radio(
+    "Go to",
+    ["Today", "Weekly Overview", "Recipes"],
+    index=0,
+    horizontal=False,
+)
+
 st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
 # ---- Filter recipes ----
@@ -135,30 +144,33 @@ if regen_needed:
 plan = st.session_state.plan
 df_plan = plan_to_dataframe(plan, meals_per_day)
 
-# Quick peek (Home keeps it simple)
-st.dataframe(df_plan, use_container_width=True, hide_index=True)
-st.info("Use the pages in the left sidebar for **Today**, **Weekly Overview**, and **Recipes**.")
-
-import urllib.parse as _up
-
-# ---- Views in tabs (replaces Quick navigation/buttons) ----
-st.markdown("### Views")
-
-tabs = st.tabs(["📅 Today", "🗓️ Weekly Overview", "📖 Recipes"])
-
+# ---- View renderer (single-file, robust) ----
+st.markdown("---")
 plan = st.session_state.plan
 meals_per_day = len(plan[1]) if plan.get(1) else 3
 
-# --- Tab 1: Today ---
-with tabs[0]:
-    st.subheader("Today’s Meals")
+from common import get_day_slots, plan_to_dataframe, consolidate_shopping_list
+from recipe_db import RECIPE_DB
+
+if view == "Today":
+    st.subheader("📅 Today’s Meals")
+
     max_day = max(plan.keys())
-    day = st.slider("Select day", 1, max_day, 1, key="today_day")
-    from common import get_day_slots
+
+    # Horizontal day picker (no slider)
+    day_label = st.radio(
+        "Pick a day",
+        [f"Day {i}" for i in range(1, max_day + 1)],
+        index=0,
+        horizontal=True,
+    )
+    day = int(day_label.split()[1])
+
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
+
     for i, r in enumerate(meals, start=1):
-        label = slots[i-1] if i-1 < len(slots) else f"Meal {i}"
+        label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
         if not r:
             st.write(f"**{label}** — (empty)")
             continue
@@ -170,17 +182,16 @@ with tabs[0]:
             for idx, step in enumerate(r.get("steps", []), start=1):
                 st.write(f"{idx}. {step}")
 
-# --- Tab 2: Weekly Overview ---
-with tabs[1]:
-    st.subheader("Weekly Overview")
-    from common import plan_to_dataframe, consolidate_shopping_list
+elif view == "Weekly Overview":
+    st.subheader("🗓️ Weekly Overview")
+
     df_plan2 = plan_to_dataframe(plan, meals_per_day)
     c1, c2 = st.columns([0.6, 0.4])
     with c1:
         st.dataframe(df_plan2, use_container_width=True, hide_index=True)
         if st.session_state.is_premium:
             day_summary = (
-                df_plan2.groupby("day")[["calories","protein_g","carbs_g","fat_g"]]
+                df_plan2.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]]
                 .sum()
                 .reset_index()
             )
@@ -191,32 +202,39 @@ with tabs[1]:
         df_shop2 = consolidate_shopping_list(plan)
         st.dataframe(df_shop2, use_container_width=True, hide_index=True)
 
-    # Optional downloads here too
     st.markdown("---")
     dl1, dl2 = st.columns(2)
     with dl1:
         st.download_button(
-            "Download Plan (CSV)", data=df_plan2.to_csv(index=False).encode(),
-            file_name="mealplan.csv", mime="text/csv"
+            "Download Plan (CSV)",
+            data=df_plan2.to_csv(index=False).encode(),
+            file_name="mealplan.csv",
+            mime="text/csv",
         )
     with dl2:
+        df_shop2 = consolidate_shopping_list(plan)
         st.download_button(
-            "Download Shopping List (CSV)", data=df_shop2.to_csv(index=False).encode(),
-            file_name="shopping_list.csv", mime="text/csv"
+            "Download Shopping List (CSV)",
+            data=df_shop2.to_csv(index=False).encode(),
+            file_name="shopping_list.csv",
+            mime="text/csv",
         )
 
-# --- Tab 3: Recipes ---
-with tabs[2]:
-    st.subheader("Recipes in this plan")
-    from recipe_db import RECIPE_DB
+elif view == "Recipes":
+    st.subheader("📖 Recipes in this plan")
+
     used_names = {r["name"] for meals in plan.values() for r in meals if r}
     used = [r for r in RECIPE_DB if r["name"] in used_names]
+
     q = st.text_input("Search recipe name or ingredient", "")
     def matches(r):
-        if not q: return True
+        if not q:
+            return True
         ql = q.lower()
-        if ql in r["name"].lower(): return True
+        if ql in r["name"].lower():
+            return True
         return any(ql in ing["item"].lower() for ing in r["ingredients"])
+
     for r in [r for r in used if matches(r)]:
         with st.expander(r["name"]):
             st.write(f"*Cuisine:* `{r.get('cuisine','')}` — *Course:* `{r.get('course','any')}`")
@@ -226,5 +244,3 @@ with tabs[2]:
             st.write("**Steps:**")
             for i, step in enumerate(r.get("steps", []), start=1):
                 st.write(f"{i}. {step}")
-
-
