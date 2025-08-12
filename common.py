@@ -145,3 +145,69 @@ def ensure_plan_exists():
     if "plan" not in st.session_state:
         st.warning("No plan yet. Go to **Home** and generate a plan first.")
         st.stop()
+
+# --- Pantry helpers (simple, robust) ---
+
+import re
+
+def _normalize_item_name(name: str) -> str:
+    """Lowercase, strip punctuation/plurals for simple matching."""
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)     # remove punctuation
+    s = re.sub(r"\s+", " ", s).strip()
+    # naive plural -> singular
+    if s.endswith("es") and len(s) > 3:
+        s = s[:-2]
+    elif s.endswith("s") and len(s) > 3:
+        s = s[:-1]
+    return s
+
+def parse_pantry_text(text: str) -> list[str]:
+    """
+    Accept either comma-separated or newline separated pantry items.
+    Example: 'rice, olive oil\nbananas'
+    """
+    if not text:
+        return []
+    # split on comma or newline
+    raw = re.split(r"[,\n]", text)
+    items = [i.strip() for i in raw if i.strip()]
+    # keep original + normalized in a set for matching
+    return items
+
+def split_shopping_by_pantry(df_shop: pd.DataFrame, pantry_items: list[str], annotate_at_bottom: bool = False):
+    """
+    Returns (need_df, have_df) after matching pantry items to shopping rows.
+    Matching is case-insensitive on normalized item names and does simple
+    substring matching to catch things like 'extra virgin olive oil' vs 'olive oil'.
+
+    annotate_at_bottom:
+        - False (default): pantry rows are removed from 'need_df' and appear in 'have_df'
+        - True: keep them in 'need_df' but also list them in 'have_df' (for “(already have)” note)
+    """
+    if df_shop is None or df_shop.empty:
+        return df_shop, pd.DataFrame(columns=df_shop.columns if df_shop is not None else ["item","quantity","unit"])
+
+    norm_map = {idx: _normalize_item_name(row["item"]) for idx, row in df_shop.iterrows()}
+
+    pantry_norm = [_normalize_item_name(p) for p in pantry_items]
+
+    need_rows = []
+    have_rows = []
+
+    for idx, row in df_shop.iterrows():
+        norm_item = norm_map[idx]
+        matched = any(p in norm_item or norm_item in p for p in pantry_norm if p)
+
+        if matched:
+            have_rows.append(row)
+            if annotate_at_bottom:
+                # keep in need list too (user wants annotation behavior)
+                need_rows.append(row)
+        else:
+            need_rows.append(row)
+
+    need_df = pd.DataFrame(need_rows).reset_index(drop=True)
+    have_df = pd.DataFrame(have_rows).reset_index(drop=True)
+
+    return need_df, have_df
