@@ -1,11 +1,11 @@
 # common.py
-import os, time, json, random
-from typing import List, Dict, Tuple
+import os, time, json, random, re
+from typing import List, Dict, Tuple, Any
 import streamlit as st
 import pandas as pd
 import requests
 
-from recipe_db import RECIPE_DB, Recipe
+from recipe_db import RECIPE_DB, Recipe  # keep using Recipe from recipe_db
 
 APP_NAME = "MealPlan Genie"
 FREE_DAYS = 3
@@ -46,11 +46,14 @@ def normalize_tokens(s: str) -> List[str]:
 
 def recipe_matches(recipe: Recipe, diets: List[str], allergies: List[str], exclusions: List[str], cuisines: List[str]) -> bool:
     for d in diets:
-        if d not in recipe["diet_tags"]: return False
+        if d not in recipe["diet_tags"]:
+            return False
     ing_tokens = [i["item"].lower() for i in recipe["ingredients"]]
     for bad in allergies + exclusions:
-        if any(bad in tok for tok in ing_tokens): return False
-    if cuisines and recipe.get("cuisine") not in cuisines: return False
+        if any(bad in tok for tok in ing_tokens):
+            return False
+    if cuisines and recipe.get("cuisine") not in cuisines:
+        return False
     return True
 
 def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target: int | None) -> Dict[int, List[Recipe]]:
@@ -70,15 +73,18 @@ def pick_meals(filtered: List[Recipe], meals_per_day: int, days: int, cal_target
         current_cals = 0
         for i, slot_key in enumerate(slot_keys, start=1):
             cands = [r for r in (buckets.get(slot_key, []) + buckets.get("any", [])) if r["name"] not in used_today]
-            if not cands: cands = [r for r in filtered if r["name"] not in used_today]
-            if not cands: continue
+            if not cands:
+                cands = [r for r in filtered if r["name"] not in used_today]
+            if not cands:
+                continue
             if cal_target:
-                remaining_slots = len(slot_keys)-(i-1)
-                desired = max(180, int((cal_target-current_cals)/max(1, remaining_slots)))
-                cands.sort(key=lambda r: abs(r["calories"]-desired))
+                remaining_slots = len(slot_keys) - (i - 1)
+                desired = max(180, int((cal_target - current_cals) / max(1, remaining_slots)))
+                cands.sort(key=lambda r: abs(r["calories"] - desired))
                 choice = cands[0]
             else:
-                random.shuffle(cands); choice = cands[0]
+                random.shuffle(cands)
+                choice = cands[0]
             meals_today.append(choice)
             used_today.add(choice["name"])
             current_cals += choice["calories"]
@@ -133,10 +139,16 @@ def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
     totals: Dict[Tuple[str,str], float] = defaultdict(float)
     for meals in plan.values():
         for rec in meals:
-            if not rec: continue
+            if not rec:
+                continue
             for ing in rec["ingredients"]:
                 key = (ing["item"].lower(), ing.get("unit",""))
-                totals[key] += float(ing.get("qty", 1.0))
+                qty = ing.get("qty", 1.0)
+                try:
+                    qty = float(qty)
+                except Exception:
+                    qty = 1.0
+                totals[key] += qty
     rows = [{"item": item.title(),"quantity": round(qty,2),"unit": unit} for (item,unit),qty in sorted(totals.items())]
     return pd.DataFrame(rows)
 
@@ -145,74 +157,6 @@ def ensure_plan_exists():
     if "plan" not in st.session_state:
         st.warning("No plan yet. Go to **Home** and generate a plan first.")
         st.stop()
-        
-# =======================
-# Shopping/plan utilities
-# =======================
-from typing import List, Dict, Tuple
-import pandas as pd
-import re
-
-# NOTE: 'Recipe' typing may already be defined in your file.
-# If not, uncomment this:
-Recipe = Dict[str, any]
-
-def plan_to_dataframe(plan: Dict[int, List[dict]], meals_per_day: int) -> pd.DataFrame:
-    """Convert plan dict -> rows for display."""
-    rows = []
-    # Reuse your slot helper if it's in common.py, else provide fallback:
-    try:
-        slot_names = get_day_slots(meals_per_day)  # existing helper in your repo
-    except NameError:
-        # Fallback if not imported above
-        def _get_day_slots(n: int) -> list[str]:
-            return ["Breakfast", "Lunch", "Dinner"] if n == 3 else (
-                ["Breakfast", "Dinner"] if n <= 2 else
-                ["Breakfast", "Lunch", "Dinner", "Snack"]
-            )
-        slot_names = _get_day_slots(meals_per_day)
-
-    for day, meals in plan.items():
-        for i, r in enumerate(meals, start=1):
-            label = slot_names[i - 1] if i - 1 < len(slot_names) else f"Meal {i}"
-            if not r:
-                rows.append({"day": day, "meal": label, "recipe": "(empty)",
-                             "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0})
-            else:
-                rows.append({
-                    "day": day,
-                    "meal": label,
-                    "recipe": r["name"],
-                    "calories": r.get("calories", 0),
-                    "protein_g": r.get("macros", {}).get("protein_g", 0),
-                    "carbs_g": r.get("macros", {}).get("carbs_g", 0),
-                    "fat_g": r.get("macros", {}).get("fat_g", 0),
-                })
-    return pd.DataFrame(rows)
-
-
-def consolidate_shopping_list(plan: Dict[int, List[dict]]) -> pd.DataFrame:
-    """Aggregate ingredients across the whole plan."""
-    from collections import defaultdict
-    totals: Dict[Tuple[str, str], float] = defaultdict(float)
-    for meals in plan.values():
-        for rec in meals:
-            if not rec:
-                continue
-            for ing in rec.get("ingredients", []):
-                item = str(ing.get("item", "")).strip()
-                qty = ing.get("qty", 1.0)
-                try:
-                    qty = float(qty)
-                except Exception:
-                    qty = 1.0
-                unit = str(ing.get("unit", "")).strip()
-                key = (item.lower(), unit)
-                totals[key] += qty
-    rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
-            for (item, unit), qty in sorted(totals.items())]
-    return pd.DataFrame(rows)
-
 
 # -------------------
 # Pantry helpers
@@ -237,14 +181,13 @@ def parse_pantry_text(text: str) -> list[str]:
 def split_shopping_by_pantry(df_shop: pd.DataFrame, pantry_items: list[str], annotate_at_bottom: bool = False):
     """
     Returns (need_df, have_df).
-      - 'need_df' = items to buy
-      - 'have_df' = pantry matches
-    If annotate_at_bottom=True, pantry rows stay in need_df too (we can label them '(have)').
+      - need_df = items to buy
+      - have_df = pantry matches
+    If annotate_at_bottom=True, pantry rows also remain in need_df (so you can label '(have)' later).
     """
     if df_shop is None or df_shop.empty:
         return df_shop, pd.DataFrame(columns=df_shop.columns if df_shop is not None else ["item","quantity","unit"])
 
-    # Build normalized lookup
     norm_map = {idx: _normalize_item_name(str(row["item"])) for idx, row in df_shop.iterrows()}
     pantry_norm = [_normalize_item_name(p) for p in pantry_items]
 
@@ -255,18 +198,10 @@ def split_shopping_by_pantry(df_shop: pd.DataFrame, pantry_items: list[str], ann
         if matched:
             have_rows.append(row)
             if annotate_at_bottom:
-                need_rows.append(row)  # keep it in the main list too (we'll annotate later)
+                need_rows.append(row)
         else:
             need_rows.append(row)
 
     need_df = pd.DataFrame(need_rows).reset_index(drop=True)
     have_df = pd.DataFrame(have_rows).reset_index(drop=True)
     return need_df, have_df
-
-
-
-
-
-
-
-
