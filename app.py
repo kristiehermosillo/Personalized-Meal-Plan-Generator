@@ -11,6 +11,13 @@ from common import (
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
 
+# --- Warm the backend so it wakes up before we need it ---
+try:
+    requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=8)
+except Exception:
+    # it's fine if this fails; verification has its own retries
+    pass
+
 # ---- Session bootstrap ----
 for k, v in {
     "is_premium": False, "calorie_target": 2000,
