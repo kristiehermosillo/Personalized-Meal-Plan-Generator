@@ -5,7 +5,8 @@ from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
-    pick_meals, pick_meals_ai, plan_to_dataframe
+    pick_meals, pick_meals_ai, plan_to_dataframe,
+    consolidate_shopping_list, parse_pantry_text, split_shopping_by_pantry
 )
 
 load_dotenv()
