@@ -206,6 +206,16 @@ st.subheader(f"Your {days}-day plan")
 # AI toggle still Premium-only
 use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True, key="use_ai_toggle")
 
+ai_mode = "Pick from built‑in"
+if use_ai:
+    ai_mode = st.radio(
+        "AI mode",
+        ["Pick from built‑in", "Generate new recipes"],
+        index=0,
+        horizontal=True,
+        help="Pick from your recipe database, or ask AI to create new recipes with ingredients & steps.",
+    )
+
 # Create a signature of “inputs that define a plan”
 def make_filters_signature() -> str:
     parts = [
@@ -279,11 +289,30 @@ else:
         st.info("Your filters changed, but the plan is locked. Click **Generate / Regenerate** to update.")
 
 if should_generate:
-    generator = pick_meals_ai if use_ai else pick_meals
-    st.session_state.plan = generator(
-        filtered, meals_per_day, days,
-        st.session_state.calorie_target if st.session_state.is_premium else None
-    )
+    if use_ai and ai_mode == "Generate new recipes":
+        # AI invents recipes (no RECIPE_DB needed)
+        from common import generate_ai_menu_with_recipes
+        ai_plan = generate_ai_menu_with_recipes(
+            days=days,
+            meals_per_day=meals_per_day,
+            diets=list(diet_flags),
+            allergies=normalize_tokens(allergies),
+            exclusions=normalize_tokens(exclusions),
+            cuisines=list(cuisines),
+            calorie_target=st.session_state.calorie_target if st.session_state.is_premium else None,
+        )
+        if ai_plan:
+            st.session_state.plan = ai_plan
+        else:
+            st.session_state.plan = {}
+    else:
+        # existing behavior
+        from common import pick_meals, pick_meals_ai
+        generator = pick_meals_ai if use_ai else pick_meals
+        st.session_state.plan = generator(
+            filtered, meals_per_day, days,
+            st.session_state.calorie_target if st.session_state.is_premium else None
+        )
     st.session_state.filters_sig = sig
 
 # Use the plan from session
@@ -398,24 +427,24 @@ elif view == "Weekly Overview":
 elif view == "Recipes":
     st.subheader("📖 Recipes in this plan")
 
-    used_names = {r["name"] for meals in plan.values() for r in meals if r}
-    used = [r for r in RECIPE_DB if r["name"] in used_names]
+    # Pull recipes directly from the plan (works for DB-picked & AI-generated)
+    used = [r for meals in plan.values() for r in meals if r]
 
     q = st.text_input("Search recipe name or ingredient", "")
     def matches(r):
         if not q:
             return True
         ql = q.lower()
-        if ql in r["name"].lower():
+        if ql in (r.get("name","").lower()):
             return True
-        return any(ql in ing["item"].lower() for ing in r["ingredients"])
+        return any(ql in str(ing.get("item","")).lower() for ing in r.get("ingredients", []))
 
     for r in [r for r in used if matches(r)]:
-        with st.expander(r["name"]):
+        with st.expander(r.get("name","Recipe")):
             st.write(f"*Cuisine:* `{r.get('cuisine','')}` — *Course:* `{r.get('course','any')}`")
             st.write("**Ingredients:**")
-            for ing in r["ingredients"]:
-                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing['item']}".strip())
+            for ing in r.get("ingredients", []):
+                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
             st.write("**Steps:**")
             for i, step in enumerate(r.get("steps", []), start=1):
                 st.write(f"{i}. {step}")
