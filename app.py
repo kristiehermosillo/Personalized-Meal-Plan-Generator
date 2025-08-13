@@ -5,9 +5,53 @@ from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
-    pick_meals, pick_meals_ai, plan_to_dataframe,
-    consolidate_shopping_list, parse_pantry_text, split_shopping_by_pantry
+    plan_to_dataframe, consolidate_shopping_list
 )
+# --- Pantry helpers: safe import with fallbacks ---
+try:
+    from common import parse_pantry_text, split_shopping_by_pantry
+except Exception:
+    import re
+    import pandas as _pd
+
+    def _normalize_item_name(name: str) -> str:
+        s = str(name).strip().lower()
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        if s.endswith("es") and len(s) > 3:
+            s = s[:-2]
+        elif s.endswith("s") and len(s) > 3:
+            s = s[:-1]
+        return s
+
+    def parse_pantry_text(text: str) -> list[str]:
+        if not text:
+            return []
+        raw = re.split(r"[,\n]", text)
+        return [i.strip() for i in raw if i.strip()]
+
+    def split_shopping_by_pantry(df_shop: _pd.DataFrame, pantry_items: list[str], annotate_at_bottom: bool = False):
+        if df_shop is None or df_shop.empty:
+            return df_shop, _pd.DataFrame(columns=df_shop.columns if df_shop is not None else ["item","quantity","unit"])
+
+        norm_map = {idx: _normalize_item_name(str(row["item"])) for idx, row in df_shop.iterrows()}
+        pantry_norm = [_normalize_item_name(p) for p in pantry_items]
+
+        need_rows, have_rows = [], []
+        for idx, row in df_shop.iterrows():
+            norm_item = norm_map[idx]
+            matched = any(p and (p in norm_item or norm_item in p) for p in pantry_norm)
+            if matched:
+                have_rows.append(row)
+                if annotate_at_bottom:
+                    need_rows.append(row)  # keep it in main list too (we'll annotate)
+            else:
+                need_rows.append(row)
+
+        need_df = _pd.DataFrame(need_rows).reset_index(drop=True)
+        have_df = _pd.DataFrame(have_rows).reset_index(drop=True)
+        return need_df, have_df
+# --- end pantry helpers fallback ---
 
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
@@ -274,11 +318,11 @@ if view == "Today":
 elif view == "Weekly Overview":
     st.subheader("🗓️ Weekly Overview")
 
-    from common import plan_to_dataframe, consolidate_shopping_list, parse_pantry_text, split_shopping_by_pantry
-
+    # --- dataframes for plan + shopping
     df_plan2 = plan_to_dataframe(plan, meals_per_day)
-    c1, c2 = st.columns([0.6, 0.4])
+    df_shop2 = consolidate_shopping_list(plan)
 
+    c1, c2 = st.columns([0.6, 0.4])
     with c1:
         st.dataframe(df_plan2, use_container_width=True, hide_index=True)
         if st.session_state.is_premium:
@@ -290,34 +334,36 @@ elif view == "Weekly Overview":
             st.markdown("**Daily totals**")
             st.dataframe(day_summary, use_container_width=True, hide_index=True)
 
-    # Pantry-aware shopping list
     with c2:
-        st.markdown("**Shopping list (need to buy)**")
-        df_shop2 = consolidate_shopping_list(plan)
+        st.markdown("**Shopping list**")
 
+        # Pantry split
         pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
-        need_df, have_df = split_shopping_by_pantry(
-            df_shop2,
-            pantry_items,
-            annotate_at_bottom=show_pantry_note,
-        )
+        annotate = st.session_state.get("show_pantry_note", False)
+        need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-        # Optional annotation if keeping pantry items in main list
-        if show_pantry_note and not need_df.empty and not have_df.empty:
-            have_norm = set(str(x).lower() for x in have_df["item"].astype(str))
-            def _annot(row):
-                nm = str(row["item"]).lower()
-                return f"{row['item']} (have)" if nm in have_norm else row["item"]
-            need_df = need_df.copy()
-            need_df["item"] = need_df.apply(_annot, axis=1)
-
-        st.dataframe(need_df, use_container_width=True, hide_index=True)
-        st.markdown("**Pantry (already have)**")
-        if have_df.empty:
-            st.caption("No matches with your pantry.")
+        if annotate:
+            # Keep pantry items in the main list but mark them
+            if not need_df.empty:
+                need_df_display = need_df.copy()
+                norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
+                need_df_display["item"] = need_df_display["item"].astype(str).apply(
+                    lambda x: f"{x} (have)" if x.lower() in norm_have else x
+                )
+                st.dataframe(need_df_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("No items needed.")
         else:
-            st.dataframe(have_df, use_container_width=True, hide_index=True)
+            # Show need & have separately
+            st.markdown("**Items to buy**")
+            st.dataframe(need_df, use_container_width=True, hide_index=True)
+            with st.expander("Pantry items (matched)"):
+                if have_df.empty:
+                    st.write("No matches.")
+                else:
+                    st.dataframe(have_df, use_container_width=True, hide_index=True)
 
+    # Downloads
     st.markdown("---")
     dl1, dl2 = st.columns(2)
     with dl1:
@@ -329,15 +375,9 @@ elif view == "Weekly Overview":
         )
     with dl2:
         st.download_button(
-            "Download Needed (CSV)",
-            data=need_df.to_csv(index=False).encode(),
-            file_name="shopping_list_needed.csv",
-            mime="text/csv",
-        )
-        st.download_button(
-            "Download Pantry (CSV)",
-            data=have_df.to_csv(index=False).encode(),
-            file_name="shopping_list_pantry.csv",
+            "Download Shopping List (CSV)",
+            data=df_shop2.to_csv(index=False).encode(),
+            file_name="shopping_list.csv",
             mime="text/csv",
         )
 
