@@ -332,6 +332,10 @@ from recipe_db import RECIPE_DB
 if view == "Today":
     st.subheader("📅 Today’s Meals")
 
+    if not plan or not list(plan.keys()):
+        st.info("No plan yet. Click **Generate / Regenerate plan** above.")
+        st.stop()
+
     max_day = max(plan.keys())
 
     # Horizontal day picker (no slider)
