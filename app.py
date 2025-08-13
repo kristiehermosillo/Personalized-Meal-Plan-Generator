@@ -5,8 +5,20 @@ from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
-    plan_to_dataframe, consolidate_shopping_list
+    plan_to_dataframe, consolidate_shopping_list,
+    pick_meals, pick_meals_ai
 )
+
+# --- Planner fallback (ensures symbol exists even if AI import fails) ---
+try:
+    pick_meals      # imported above
+    pick_meals_ai   # imported above
+except NameError:
+    def pick_meals_ai(*args, **kwargs):
+        # If the AI planner isn’t available, use the normal one
+        return pick_meals(*args, **kwargs)
+# --- end planner fallback ---
+
 # --- Pantry helpers: safe import with fallbacks ---
 try:
     from common import parse_pantry_text, split_shopping_by_pantry
@@ -174,6 +186,7 @@ show_pantry_note = st.sidebar.checkbox(
     value=False,
     help="If checked, pantry items also appear in the main list so you can mark them '(have)'",
 )
+st.session_state["show_pantry_note"] = show_pantry_note
 
 # ---- Filter recipes ----
 filtered = [r for r in RECIPE_DB if recipe_matches(
