@@ -132,29 +132,96 @@ if not filtered:
     st.warning("No recipes match your filters. Try removing some restrictions 🤔")
     st.stop()
 
-# ---- Plan generation (with AI toggle) ----
+# ---- Plan generation (manual + lock + save/load) ----
+import json
+import hashlib
+
 st.subheader(f"Your {days}-day plan")
-use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True)
 
-regen_needed = (
-    "plan" not in st.session_state
-    or st.session_state.get("meals_per_day_prev") != meals_per_day
-    or st.session_state.get("days_prev") != days
-    or st.session_state.get("used_ai_prev") != bool(use_ai)
-    or st.session_state.get("filters_hash") != hash(tuple(sorted([*diet_flags,*cuisines,*normalize_tokens(allergies),*normalize_tokens(exclusions)])))
-)
+# AI toggle still Premium-only
+use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True, key="use_ai_toggle")
 
-if regen_needed:
+# Create a signature of “inputs that define a plan”
+def make_filters_signature() -> str:
+    parts = [
+        tuple(sorted(diet_flags)),
+        tuple(sorted(cuisines)),
+        tuple(sorted(normalize_tokens(allergies))),
+        tuple(sorted(normalize_tokens(exclusions))),
+        meals_per_day,
+        days,
+        int(st.session_state.calorie_target) if st.session_state.is_premium else None,
+        bool(use_ai),
+    ]
+    raw = json.dumps(parts, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+sig = make_filters_signature()
+
+# Controls
+cols = st.columns([0.35, 0.35, 0.30])
+with cols[0]:
+    gen_clicked = st.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
+with cols[1]:
+    st.session_state.plan_locked = st.checkbox(
+        "🔒 Lock this plan (don’t auto-change)",
+        value=st.session_state.get("plan_locked", False)
+    )
+with cols[2]:
+    # Save/Load plan JSON
+    dl_plan = None
+    if "plan" in st.session_state:
+        dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
+        st.download_button(
+            "⬇️ Download plan (JSON)",
+            data=dl_plan,
+            file_name="mealplan.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+# Load JSON
+uploaded = st.file_uploader("⬆️ Load plan (JSON)", type=["json"], label_visibility="collapsed")
+if uploaded is not None:
+    try:
+        loaded_plan = json.loads(uploaded.read().decode("utf-8"))
+        # basic validation: expect dict of day->list
+        if isinstance(loaded_plan, dict):
+            st.session_state.plan = loaded_plan
+            st.session_state.filters_sig = sig  # assume this plan corresponds to current filters
+            st.success("Plan loaded from file.")
+        else:
+            st.error("Invalid plan file format.")
+    except Exception as e:
+        st.error(f"Could not load plan: {e}")
+
+# Decide if we should (re)generate
+should_generate = False
+
+if "plan" not in st.session_state:
+    # First-time: generate once
+    should_generate = True
+elif gen_clicked:
+    # User explicitly wants a new plan
+    should_generate = True
+elif not st.session_state.get("plan_locked", False):
+    # If not locked and inputs changed, we can auto-update
+    if st.session_state.get("filters_sig") != sig:
+        should_generate = True
+else:
+    # Locked, but inputs differ → warn once
+    if st.session_state.get("filters_sig") != sig:
+        st.info("Your filters changed, but the plan is locked. Click **Generate / Regenerate** to update.")
+
+if should_generate:
     generator = pick_meals_ai if use_ai else pick_meals
     st.session_state.plan = generator(
         filtered, meals_per_day, days,
         st.session_state.calorie_target if st.session_state.is_premium else None
     )
-    st.session_state.meals_per_day_prev = meals_per_day
-    st.session_state.days_prev = days
-    st.session_state.used_ai_prev = bool(use_ai)
-    st.session_state.filters_hash = hash(tuple(sorted([*diet_flags,*cuisines,*normalize_tokens(allergies),*normalize_tokens(exclusions)])))
+    st.session_state.filters_sig = sig
 
+# Use the plan from session
 plan = st.session_state.plan
 df_plan = plan_to_dataframe(plan, meals_per_day)
 
