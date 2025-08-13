@@ -6,9 +6,11 @@ from common import (
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
     plan_to_dataframe, consolidate_shopping_list,
-    pick_meals, pick_meals_ai, generate_ai_menu_with_recipes
+    pick_meals, pick_meals_ai,             
+    generate_ai_menu_with_recipes             
 )
 
+from common import generate_ai_menu_with_recipes
 
 # --- Planner fallback (ensures symbol exists even if AI import fails) ---
 try:
