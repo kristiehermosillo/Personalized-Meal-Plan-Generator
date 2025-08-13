@@ -120,18 +120,177 @@ def pick_meals_ai(filtered: List[Recipe], meals_per_day: int, days: int, cal_tar
     except Exception as e:
         st.warning(f"AI planner failed; using default. {e}")
         return pick_meals(filtered, meals_per_day, days, cal_target)
+# === AI: generate brand-new recipes with ingredients & steps ===
+def generate_ai_menu_with_recipes(
+    days: int,
+    meals_per_day: int,
+    diets: list[str] | None = None,
+    allergies: list[str] | None = None,
+    exclusions: list[str] | None = None,
+    cuisines: list[str] | None = None,
+    calorie_target: int | None = None,
+    model: str = OPENROUTER_MODEL,
+) -> dict[int, list[dict]]:
+    """
+    Returns a plan dict: {day: [RecipeLike, ...], ...}
+    Each RecipeLike matches the shape your app already expects:
+      {
+        "name": str,
+        "course": "breakfast"|"lunch"|"dinner"|"any",
+        "calories": int,
+        "macros": {"protein_g": int, "carbs_g": int, "fat_g": int},
+        "ingredients": [{"item": str, "qty": float|str, "unit": str}, ...],
+        "steps": [str, ...],
+        "cuisine": str
+      }
+    """
+    # Build prompt/schema
+    slots = get_day_slots(meals_per_day)
+    constraints = {
+        "days": days,
+        "slots": slots,
+        "diets": diets or [],
+        "allergies": allergies or [],
+        "exclusions": exclusions or [],
+        "cuisines": cuisines or [],
+        "daily_calorie_target": calorie_target,
+    }
+    schema = {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "day": {"type": "integer"},
+              "meals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {"type": "string"},
+                    "recipe": {
+                      "type": "object",
+                      "properties": {
+                        "name": {"type": "string"},
+                        "course": {"type": "string"},
+                        "cuisine": {"type": "string"},
+                        "calories": {"type": "integer"},
+                        "macros": {
+                          "type": "object",
+                          "properties": {
+                            "protein_g": {"type": "integer"},
+                            "carbs_g": {"type": "integer"},
+                            "fat_g": {"type": "integer"}
+                          }
+                        },
+                        "ingredients": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "item": {"type": "string"},
+                              "qty": {"type": ["number","string"]},
+                              "unit": {"type": "string"}
+                            },
+                            "required": ["item"]
+                          }
+                        },
+                        "steps": {"type": "array", "items": {"type": "string"}}
+                      },
+                      "required": ["name","ingredients","steps"]
+                    }
+                  },
+                  "required": ["slot","recipe"]
+                }
+              }
+            },
+            "required": ["day","meals"]
+          }
+        }
+      },
+      "required": ["plan"]
+    }
 
-def plan_to_dataframe(plan: Dict[int, List[Recipe]], meals_per_day: int) -> pd.DataFrame:
+    sys = (
+        "You are a meal-planning chef. Generate complete, practical recipes "
+        "that use widely available ingredients. Keep units simple (cup, tbsp, tsp, g). "
+        "Respect dietary/allergy constraints. Match the requested slots (breakfast/lunch/dinner). "
+        "Aim near the daily calorie target if provided."
+    )
+    messages = [
+        {"role": "system", "content": sys},
+        {"role": "user", "content":
+            "Return ONLY JSON matching this schema.\n"
+            + json.dumps(schema)
+            + "\n\nConstraints:\n"
+            + json.dumps(constraints)
+        }
+    ]
+
+    try:
+        data = call_openrouter(messages, model=model, max_tokens=2200)
+        text = data["choices"][0]["message"]["content"].strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+        parsed = json.loads(text)
+        out: dict[int, list[dict]] = {}
+        for block in parsed.get("plan", []):
+            day = int(block.get("day", 0))
+            meals: list[dict] = []
+            for m in block.get("meals", []):
+                r = m.get("recipe", {}) or {}
+                # normalize to your internal shape
+                meals.append({
+                    "name": r.get("name","Recipe"),
+                    "course": (r.get("course") or "any").lower(),
+                    "cuisine": r.get("cuisine",""),
+                    "calories": int(r.get("calories") or 0),
+                    "macros": {
+                        "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
+                        "carbs_g":   int((r.get("macros") or {}).get("carbs_g") or 0),
+                        "fat_g":     int((r.get("macros") or {}).get("fat_g") or 0),
+                    },
+                    "ingredients": [
+                        {
+                          "item": str(i.get("item","")).strip(),
+                          "qty": i.get("qty", 1),
+                          "unit": str(i.get("unit","")).strip(),
+                        }
+                        for i in (r.get("ingredients") or [])
+                        if str(i.get("item","")).strip()
+                    ],
+                    "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
+                })
+            if day:
+                out[day] = meals
+        # Fallback: if the model failed, return an empty dict
+        return out or {}
+    except Exception as e:
+        st.warning(f"AI recipe generation failed; {e}")
+        return {}
+
+def plan_to_dataframe(plan: Dict[int, List[dict]], meals_per_day: int) -> pd.DataFrame:
     rows = []
     slots = get_day_slots(meals_per_day)
     for day, meals in plan.items():
         for i, r in enumerate(meals, start=1):
             label = slots[i-1] if i-1 < len(slots) else f"Meal {i}"
-            if r is None:
-                rows.append({"day":day,"meal":label,"recipe":"(empty)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0})
+            if not r:
+                rows.append({"day": day, "meal": label, "recipe": "(empty)",
+                             "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0})
             else:
-                rows.append({"day":day,"meal":label,"recipe":r["name"],"calories":r["calories"],
-                             "protein_g":r["macros"]["protein_g"],"carbs_g":r["macros"]["carbs_g"],"fat_g":r["macros"]["fat_g"]})
+                m = r.get("macros", {})
+                rows.append({
+                    "day": day,
+                    "meal": label,
+                    "recipe": r.get("name", "Recipe"),
+                    "calories": int(r.get("calories", 0)),
+                    "protein_g": int(m.get("protein_g", 0)),
+                    "carbs_g":   int(m.get("carbs_g", 0)),
+                    "fat_g":     int(m.get("fat_g", 0)),
+                })
     return pd.DataFrame(rows)
 
 def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
@@ -147,7 +306,15 @@ def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
                 try:
                     qty = float(qty)
                 except Exception:
-                    qty = 1.0
+                    # naïve fraction support like "1/2"
+                    try:
+                        if isinstance(qty, str) and "/" in qty:
+                            num, den = qty.split("/", 1)
+                            qty = float(num.strip()) / float(den.strip())
+                        else:
+                            qty = 1.0
+                    except Exception:
+                        qty = 1.0
                 totals[key] += qty
     rows = [{"item": item.title(),"quantity": round(qty,2),"unit": unit} for (item,unit),qty in sorted(totals.items())]
     return pd.DataFrame(rows)
