@@ -230,11 +230,30 @@ def generate_ai_menu_with_recipes(
     ]
 
     try:
+        # --- Call AI and extract JSON safely ---
         data = call_openrouter(messages, model=model, max_tokens=2200)
-        text = data["choices"][0]["message"]["content"].strip().strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-        parsed = json.loads(text)
+        raw_text = data["choices"][0]["message"]["content"]
+        
+        # Try to clean AI output
+        cleaned = raw_text.strip().strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+        
+        # Try to parse, fall back if bad
+        try:
+            parsed = json.loads(cleaned)
+        except Exception:
+            # crude fallback: find biggest {...} or [...] in text
+            import re
+            import json as _json
+            matches = re.findall(r"\{.*\}|\[.*\]", cleaned, re.DOTALL)
+            if matches:
+                try:
+                    parsed = _json.loads(max(matches, key=len))
+                except Exception:
+                    parsed = {}
+            else:
+                parsed = {}
         out: dict[int, list[dict]] = {}
         for block in parsed.get("plan", []):
             day = int(block.get("day", 0))
