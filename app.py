@@ -316,24 +316,22 @@ else:
 
 if should_generate:
     if use_ai and ai_mode == "Generate new recipes":
-        # AI invents recipes (no RECIPE_DB needed)
-        try:
-            ai_plan = generate_ai_menu_with_recipes(
-                days=days,
-                meals_per_day=meals_per_day,
-                diets=list(diet_flags),
-                allergies=normalize_tokens(allergies),
-                exclusions=normalize_tokens(exclusions),
-                cuisines=list(cuisines),
-                calorie_target=st.session_state.calorie_target if st.session_state.is_premium else None,
-            )
-            st.write("DEBUG: AI returned →", ai_plan)
-        except Exception as e:
-            st.error(f"AI generation failed: {e}")
-            ai_plan = {}
+        ai_plan = generate_ai_menu_with_recipes(
+            days=days,
+            meals_per_day=meals_per_day,
+            diets=list(diet_flags),
+            allergies=normalize_tokens(allergies),
+            exclusions=normalize_tokens(exclusions),
+            cuisines=list(cuisines),
+            calorie_target=st.session_state.calorie_target if st.session_state.is_premium else None,
+        )
+        if ai_plan:
+            st.session_state.plan = ai_plan
+        else:
+            # <- DO NOT silently continue; make it obvious
+            st.session_state.plan = {}
+            st.stop()  # shows the error from common.py and stops rendering
     else:
-        # existing behavior
-        from common import pick_meals, pick_meals_ai
         generator = pick_meals_ai if use_ai else pick_meals
         st.session_state.plan = generator(
             filtered, meals_per_day, days,
