@@ -70,6 +70,11 @@ except Exception:
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
 
+# --- sanity check: is the OpenRouter key visible? (don’t print the key) ---
+if st.session_state.get("use_ai_toggle", False):  # only show when AI toggle is on
+    if not (st.secrets.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+        st.error("OPENROUTER_API_KEY not found in secrets/env. Add it in App → Settings → Secrets and rerun.")
+
 # --- Warm the backend so it wakes up before we need it ---
 try:
     requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=8)
@@ -234,6 +239,20 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
+
+with st.expander("AI connection test (optional)"):
+    if st.button("Run a 1-shot OpenRouter test"):
+        try:
+            from common import call_openrouter, OPENROUTER_MODEL
+            resp = call_openrouter(
+                [{"role": "user", "content": "Reply with the word OK"}],
+                model=OPENROUTER_MODEL,
+                max_tokens=5,
+            )
+            st.success("OpenRouter call succeeded.")
+            st.write(resp.get("choices", [{}])[0].get("message", {}))
+        except Exception as e:
+            st.error(f"OpenRouter call failed: {e}")
 
 # Controls
 cols = st.columns([0.35, 0.35, 0.30])
