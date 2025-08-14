@@ -366,14 +366,23 @@ if view == "Today":
 elif view == "Weekly Overview":
     st.subheader("🗓️ Weekly Overview")
 
-    # --- dataframes for plan + shopping
-    df_plan2 = plan_to_dataframe(plan, meals_per_day)
+    # Build dataframes safely
+    df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
+
+    # If there’s nothing to show yet, stop before grouping
+    if df_plan2 is None or df_plan2.empty or "day" not in df_plan2.columns:
+        st.info("No plan data to summarize. Click **Generate / Regenerate plan** first.")
+        st.stop()
+
     df_shop2 = consolidate_shopping_list(plan)
 
     c1, c2 = st.columns([0.6, 0.4])
     with c1:
         st.dataframe(df_plan2, use_container_width=True, hide_index=True)
-        if st.session_state.is_premium:
+
+        # Daily totals only if columns are present
+        needed_cols = {"calories", "protein_g", "carbs_g", "fat_g"}
+        if st.session_state.is_premium and needed_cols.issubset(set(df_plan2.columns)):
             day_summary = (
                 df_plan2.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]]
                 .sum()
@@ -385,13 +394,12 @@ elif view == "Weekly Overview":
     with c2:
         st.markdown("**Shopping list**")
 
-        # Pantry split
+        # Pantry split (re-use your helpers)
         pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
         annotate = st.session_state.get("show_pantry_note", False)
         need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
         if annotate:
-            # Keep pantry items in the main list but mark them
             if not need_df.empty:
                 need_df_display = need_df.copy()
                 norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
@@ -402,7 +410,6 @@ elif view == "Weekly Overview":
             else:
                 st.info("No items needed.")
         else:
-            # Show need & have separately
             st.markdown("**Items to buy**")
             st.dataframe(need_df, use_container_width=True, hide_index=True)
             with st.expander("Pantry items (matched)"):
@@ -428,6 +435,7 @@ elif view == "Weekly Overview":
             file_name="shopping_list.csv",
             mime="text/csv",
         )
+
 
 
 elif view == "Recipes":
