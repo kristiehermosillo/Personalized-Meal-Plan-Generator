@@ -6,8 +6,7 @@ from common import (
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
     plan_to_dataframe, consolidate_shopping_list,
-    pick_meals, pick_meals_ai,             
-    generate_ai_menu_with_recipes             
+    pick_meals, pick_meals_ai, generate_ai_menu_with_recipes
 )
 
 from common import generate_ai_menu_with_recipes
@@ -275,15 +274,16 @@ if uploaded is not None:
 
 # Decide if we should (re)generate
 should_generate = False
+existing_plan = st.session_state.get("plan")
 
-if "plan" not in st.session_state:
-    # First-time: generate once
+if ("plan" not in st.session_state) or (not existing_plan):
+    # First-time or previously empty: generate once
     should_generate = True
 elif gen_clicked:
     # User explicitly wants a new plan
     should_generate = True
 elif not st.session_state.get("plan_locked", False):
-    # If not locked and inputs changed, we can auto-update
+    # If not locked and inputs changed, auto-update
     if st.session_state.get("filters_sig") != sig:
         should_generate = True
 else:
