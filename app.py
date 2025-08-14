@@ -279,6 +279,10 @@ existing_plan = st.session_state.get("plan")
 if ("plan" not in st.session_state) or (not existing_plan):
     # First-time or previously empty: generate once
     should_generate = True
+
+if ("plan" not in st.session_state) or (not existing_plan):
+    # First-time or previously empty: generate once
+    should_generate = True
 elif gen_clicked:
     # User explicitly wants a new plan
     should_generate = True
