@@ -132,29 +132,23 @@ def generate_ai_menu_with_recipes(
     model: str = OPENROUTER_MODEL,
 ) -> dict[int, list[dict]]:
     """
-    Returns a plan dict: {day: [RecipeLike, ...], ...}
-    Each RecipeLike matches the shape your app already expects:
-      {
-        "name": str,
-        "course": "breakfast"|"lunch"|"dinner"|"any",
-        "calories": int,
-        "macros": {"protein_g": int, "carbs_g": int, "fat_g": int},
-        "ingredients": [{"item": str, "qty": float|str, "unit": str}, ...],
-        "steps": [str, ...],
-        "cuisine": str
-      }
+    Ask the model to CREATE recipes + a weekly plan and return a dict:
+      { 1: [recipe_like, ...], 2: [...], ... }
+    If the model doesn't return usable JSON, this function shows a clear error
+    and returns {} (so the UI can tell you it failed).
     """
-    # Build prompt/schema
     slots = get_day_slots(meals_per_day)
     constraints = {
         "days": days,
-        "slots": slots,
+        "slots": slots,  # e.g. ["Breakfast","Lunch","Dinner"]
         "diets": diets or [],
         "allergies": allergies or [],
         "exclusions": exclusions or [],
         "cuisines": cuisines or [],
         "daily_calorie_target": calorie_target,
     }
+
+    # What we want back
     schema = {
       "type": "object",
       "properties": {
@@ -213,136 +207,112 @@ def generate_ai_menu_with_recipes(
       "required": ["plan"]
     }
 
-    sys = (
+    system_msg = (
         "You are a meal-planning chef. Generate complete, practical recipes "
-        "that use widely available ingredients. Keep units simple (cup, tbsp, tsp, g). "
-        "Respect dietary/allergy constraints. Match the requested slots (breakfast/lunch/dinner). "
-        "Aim near the daily calorie target if provided."
+        "that use widely available ingredients. Use simple units (cup, tbsp, tsp, g). "
+        "Respect dietary/allergy constraints. Match the requested slots "
+        "(breakfast/lunch/dinner). Aim near the daily calorie target if provided.\n\n"
+        "RETURN ONLY RAW JSON. Do NOT wrap in code fences. Do NOT add commentary."
     )
+
     messages = [
-        {"role": "system", "content": sys},
-        {"role": "user", "content":
-            "Return ONLY JSON matching this schema.\n"
-            + json.dumps(schema)
-            + "\n\nConstraints:\n"
-            + json.dumps(constraints)
-        }
+        {"role": "system", "content": system_msg},
+        {
+            "role": "user",
+            "content": (
+                "Schema (strict):\n"
+                f"{json.dumps(schema)}\n\n"
+                "Constraints:\n"
+                f"{json.dumps(constraints)}\n\n"
+                "Again, return ONLY the JSON object that matches the schema above."
+            ),
+        },
     ]
 
+    # ---- Call model
     try:
-        # --- Call AI and extract JSON safely ---
-        data = call_openrouter(messages, model=model, max_tokens=2200)
-        raw_text = data["choices"][0]["message"]["content"]
-        
-        # Try to clean AI output
-        cleaned = raw_text.strip().strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:].strip()
-        
-        # Try to parse, fall back if bad
-        try:
-            parsed = json.loads(cleaned)
-        except Exception:
-            # crude fallback: find biggest {...} or [...] in text
-            import re
-            import json as _json
-            matches = re.findall(r"\{.*\}|\[.*\]", cleaned, re.DOTALL)
-            if matches:
-                try:
-                    parsed = _json.loads(max(matches, key=len))
-                except Exception:
-                    parsed = {}
-            else:
-                parsed = {}
-        out: dict[int, list[dict]] = {}
+        resp = call_openrouter(messages, model=model, max_tokens=2200)
+        raw = (resp.get("choices", [{}])[0]
+                   .get("message", {})
+                   .get("content", "") or "")
+    except Exception as e:
+        st.error(f"AI request failed: {e}")
+        return {}
+
+    # ---- Extract JSON from possible markdown / extra text
+    def _extract_json(text: str) -> str:
+        t = text.strip()
+        # If fenced block present
+        if "```" in t:
+            # try ```json ... ```
+            import re as _re
+            m = _re.search(r"```json\s*(.+?)```", t, flags=_re.S|_re.I)
+            if m:
+                return m.group(1).strip()
+            m = _re.search(r"```(\s*.+?)```", t, flags=_re.S)
+            if m:
+                return m.group(1).strip()
+        # else brute: first { ... last }
+        if "{" in t and "}" in t:
+            start = t.find("{")
+            end = t.rfind("}")
+            return t[start:end+1]
+        return t
+
+    cleaned = _extract_json(raw)
+
+    # ---- Parse and normalize
+    try:
+        parsed = json.loads(cleaned)
+    except Exception as e:
+        st.error("AI returned non‑JSON or invalid JSON. "
+                 "Enable 'Generate new recipes' again to retry.")
+        with st.expander("Show AI raw output"):
+            st.code(raw[:4000])
+        return {}
+
+    plan_dict: dict[int, list[dict]] = {}
+    try:
         for block in parsed.get("plan", []):
             day = int(block.get("day", 0))
-            meals: list[dict] = []
+            meals_out: list[dict] = []
             for m in block.get("meals", []):
                 r = m.get("recipe", {}) or {}
-                # normalize to your internal shape
-                meals.append({
-                    "name": r.get("name","Recipe"),
-                    "course": (r.get("course") or "any").lower(),
-                    "cuisine": r.get("cuisine",""),
+                meals_out.append({
+                    "name": r.get("name", "Recipe"),
+                    "course": (r.get("course") or m.get("slot") or "any").lower(),
+                    "cuisine": r.get("cuisine", ""),
                     "calories": int(r.get("calories") or 0),
                     "macros": {
                         "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
-                        "carbs_g":   int((r.get("macros") or {}).get("carbs_g") or 0),
-                        "fat_g":     int((r.get("macros") or {}).get("fat_g") or 0),
+                        "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
+                        "fat_g":     int((r.get("macros") or {}).get("fat_g")     or 0),
                     },
                     "ingredients": [
                         {
-                          "item": str(i.get("item","")).strip(),
-                          "qty": i.get("qty", 1),
-                          "unit": str(i.get("unit","")).strip(),
+                            "item": str(i.get("item","")).strip(),
+                            "qty":  i.get("qty", 1),
+                            "unit": str(i.get("unit","")).strip(),
                         }
                         for i in (r.get("ingredients") or [])
                         if str(i.get("item","")).strip()
                     ],
                     "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
                 })
-            if day:
-                out[day] = meals
-        # Fallback: if the model failed, return an empty dict
-        return out or {}
+            if day and meals_out:
+                plan_dict[day] = meals_out
     except Exception as e:
-        st.warning(f"AI recipe generation failed; {e}")
+        st.error(f"Could not normalize AI output: {e}")
+        with st.expander("Show parsed JSON"):
+            st.code(json.dumps(parsed, indent=2))
         return {}
 
-def plan_to_dataframe(plan: Dict[int, List[dict]], meals_per_day: int) -> pd.DataFrame:
-    rows = []
-    slots = get_day_slots(meals_per_day)
-    for day, meals in plan.items():
-        for i, r in enumerate(meals, start=1):
-            label = slots[i-1] if i-1 < len(slots) else f"Meal {i}"
-            if not r:
-                rows.append({"day": day, "meal": label, "recipe": "(empty)",
-                             "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0})
-            else:
-                m = r.get("macros", {})
-                rows.append({
-                    "day": day,
-                    "meal": label,
-                    "recipe": r.get("name", "Recipe"),
-                    "calories": int(r.get("calories", 0)),
-                    "protein_g": int(m.get("protein_g", 0)),
-                    "carbs_g":   int(m.get("carbs_g", 0)),
-                    "fat_g":     int(m.get("fat_g", 0)),
-                })
-    return pd.DataFrame(rows)
+    if not plan_dict:
+        st.error("AI didn’t return any usable meals. Try again or switch to 'Pick from built‑in'.")
+        with st.expander("Show parsed JSON"):
+            st.code(json.dumps(parsed, indent=2))
+    return plan_dict
 
-def consolidate_shopping_list(plan: Dict[int, List[Recipe]]) -> pd.DataFrame:
-    from collections import defaultdict
-    totals: Dict[Tuple[str,str], float] = defaultdict(float)
-    for meals in plan.values():
-        for rec in meals:
-            if not rec:
-                continue
-            for ing in rec["ingredients"]:
-                key = (ing["item"].lower(), ing.get("unit",""))
-                qty = ing.get("qty", 1.0)
-                try:
-                    qty = float(qty)
-                except Exception:
-                    # naïve fraction support like "1/2"
-                    try:
-                        if isinstance(qty, str) and "/" in qty:
-                            num, den = qty.split("/", 1)
-                            qty = float(num.strip()) / float(den.strip())
-                        else:
-                            qty = 1.0
-                    except Exception:
-                        qty = 1.0
-                totals[key] += qty
-    rows = [{"item": item.title(),"quantity": round(qty,2),"unit": unit} for (item,unit),qty in sorted(totals.items())]
-    return pd.DataFrame(rows)
-
-def ensure_plan_exists():
-    """Guard for subpages: if no plan in session, ask user to go to Home."""
-    if "plan" not in st.session_state:
-        st.warning("No plan yet. Go to **Home** and generate a plan first.")
-        st.stop()
 
 # -------------------
 # Pantry helpers
