@@ -14,6 +14,26 @@ PREMIUM_DAYS = 7
 # Backend URL (Stripe etc.)
 DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
+def call_openrouter(messages, model=OPENROUTER_MODEL, max_tokens=1200, temperature=0):
+    """Minimal OpenRouter client for Streamlit Cloud."""
+    api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY missing in env or secrets")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": float(temperature or 0),
+    }
+    r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
+    r.raise_for_status()
+    return r.json()
+
 # Try to wake Render backend (no-op if not deployed)
 try:
     requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=5)
@@ -29,14 +49,12 @@ def _extract_json(text: str) -> str:
     """Return the largest JSON object in the text. Ignores prose and code fences."""
     t = (text or "").strip()
 
-    # Pull from code fence if present
     m = re.search(r"```json\s*(.+?)```", t, flags=re.S | re.I)
     if not m:
         m = re.search(r"```\s*(.+?)```", t, flags=re.S)
     if m:
         t = m.group(1).strip()
 
-    # Scan braces to find the largest balanced object
     starts = []
     best = None
     for i, ch in enumerate(t):
@@ -52,7 +70,6 @@ def _extract_json(text: str) -> str:
     if best:
         return t[best[0]:best[1]]
 
-    # Fallback to first brace slice
     if "{" in t and "}" in t:
         return t[t.find("{"): t.rfind("}") + 1]
     return t
@@ -247,10 +264,7 @@ def generate_ai_menu_with_recipes(
     calorie_target: int | None = None,
     model: str = OPENROUTER_MODEL,
 ) -> dict[int, list[dict]]:
-    """
-    Asks the model to create recipes plus a weekly plan and returns:
-      { 1: [recipe_like, ...], 2: [...], ... }
-    """
+    """Create recipes plus a weekly plan and return {day: [recipe_like,...]}."""
 
     def _primary_protein(ingredients: list[dict]) -> str:
         txt = " ".join(str(i.get("item", "")).lower() for i in (ingredients or []))
@@ -331,7 +345,7 @@ def generate_ai_menu_with_recipes(
     system_msg = (
         "You are a meal planning chef. Generate complete, practical recipes with common ingredients. "
         "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
-        "Return JSON only. No markdown, no prose."
+        "Return JSON only. No markdown. No prose."
     )
 
     plan_dict: dict[int, list[dict]] = {}
@@ -413,12 +427,10 @@ def generate_ai_menu_with_recipes(
 
         raw, parsed = _ask_once()
         if parsed is None:
-            # one retry with a stronger hint
             raw, parsed = _ask_once(
                 extra_hint="\n- You returned invalid or duplicate content. Replace with different recipes and ensure all required fields."
             )
             if parsed is None:
-                # leave the day empty but continue the week
                 st.warning(f"Skipping day {day_idx} due to invalid JSON.")
                 continue
 
@@ -438,7 +450,12 @@ def generate_ai_menu_with_recipes(
 
     if not plan_dict:
         st.error("AI did not return any usable meals. Try again or switch to Pick from built in.")
+    else:
+        missing = [d for d in range(1, days + 1) if d not in plan_dict]
+        if missing:
+            st.warning(f"Invalid JSON on some days: {missing}. The rest of the week is ready.")
     return plan_dict
+
 
 # ===== Plan → DataFrame & Shopping list =====
 
