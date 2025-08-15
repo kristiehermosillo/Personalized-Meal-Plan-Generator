@@ -247,36 +247,52 @@ def generate_ai_menu_with_recipes(
         return {}
 
     # ---- Extract JSON from possible markdown / extra text
+    import re as _re
+    
     def _extract_json(text: str) -> str:
         t = text.strip()
-        # If fenced block present
         if "```" in t:
-            # try ```json ... ```
-            import re as _re
-            m = _re.search(r"```json\s*(.+?)```", t, flags=_re.S|_re.I)
-            if m:
+            m = _re.search(r"```json\s*(.+?)```", t, flags=_re.S | _re.I)
+            if m: 
                 return m.group(1).strip()
             m = _re.search(r"```(\s*.+?)```", t, flags=_re.S)
             if m:
                 return m.group(1).strip()
-        # else brute: first { ... last }
         if "{" in t and "}" in t:
             start = t.find("{")
             end = t.rfind("}")
             return t[start:end+1]
         return t
-
-    cleaned = _extract_json(raw)
-
-    # ---- Parse and normalize
+    
+    def _clean_json(text: str) -> str:
+        # normalize quotes / spaces
+        t = (text
+             .replace("\u201c", '"').replace("\u201d", '"')  # smart double quotes
+             .replace("\u2018", "'").replace("\u2019", "'")  # smart single quotes
+             .replace("\xa0", " ")                           # non‑breaking space
+        )
+        # remove trailing commas before ] or }
+        t = _re.sub(r",\s*(\])", r"\1", t, flags=_re.S)
+        t = _re.sub(r",\s*(\})", r"\1", t, flags=_re.S)
+        return t.strip()
+    
+    cleaned = _clean_json(_extract_json(raw))
+    
+    # ---- Parse and normalize (with a fallback attempt)
     try:
         parsed = json.loads(cleaned)
-    except Exception as e:
-        st.error("AI returned non‑JSON or invalid JSON. "
-                 "Enable 'Generate new recipes' again to retry.")
-        with st.expander("Show AI raw output"):
-            st.code(raw[:4000])
-        return {}
+    except Exception:
+        # One more gentle pass: collapse repeated commas/newlines, then try again
+        cleaned2 = _re.sub(r",\s*,", ",", cleaned)
+        try:
+            parsed = json.loads(cleaned2)
+        except Exception as e:
+            st.error("AI returned non‑JSON or invalid JSON. Enable **Generate new recipes** again to retry.")
+            with st.expander("Show AI raw output"):
+                st.code(raw[:6000])
+            with st.expander("Show cleaned JSON we tried to parse"):
+                st.code(cleaned[:6000], language="json")
+            return {}
 
     plan_dict: dict[int, list[dict]] = {}
     try:
