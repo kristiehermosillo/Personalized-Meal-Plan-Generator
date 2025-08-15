@@ -477,61 +477,170 @@ if view == "Today":
                 st.write(f"{idx}. {step}")
 
 elif view == "Weekly Overview":
-    st.subheader("🗓️ Weekly Overview")
+    st.subheader("🗓️ Week at a glance")
 
     # Build dataframes safely
     df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
-
-    # If there’s nothing to show yet, stop before grouping
     if df_plan2 is None or df_plan2.empty or "day" not in df_plan2.columns:
-        st.info("No plan data to summarize. Click **Generate / Regenerate plan** first.")
+        st.info("No plan data to summarize yet. Click **Generate my meal plan** first.")
         st.stop()
 
-    df_shop2 = consolidate_shopping_list(plan, household_size=int(st.session_state.get("household_size", 1)))
+    # Shopping list (scaled)
+    hh_size = int(st.session_state.get("household_size", 1))
+    df_shop2 = consolidate_shopping_list(plan, household_size=hh_size)
 
-    c1, c2 = st.columns([0.6, 0.4])
-    with c1:
-        st.dataframe(df_plan2, use_container_width=True, hide_index=True)
+    # Sidebar pantry parsing
+    pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
+    annotate = st.session_state.get("show_pantry_note", False)
+    need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-        # Daily totals only if columns are present
-        needed_cols = {"calories", "protein_g", "carbs_g", "fat_g"}
-        if st.session_state.is_premium and needed_cols.issubset(set(df_plan2.columns)):
-            day_summary = (
-                df_plan2.groupby("day")[["calories", "protein_g", "carbs_g", "fat_g"]]
-                .sum()
-                .reset_index()
+    # Quick summary chips across the top
+    st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
+    cols = st.columns(min(days, 7))
+    for i, col in enumerate(cols, start=1):
+        sub = df_plan2[df_plan2["day"] == i]
+        kcal = int(sub["calories"].sum()) if not sub.empty else 0
+        col.metric(f"Day {i}", f"{kcal:,} kcal")
+
+    # Friendlier column names
+    plan_display = df_plan2.rename(columns={
+        "day": "Day",
+        "meal": "Meal",
+        "recipe": "Recipe",
+        "calories": "Calories",
+        "protein_g": "Protein (g)",
+        "carbs_g": "Carbs (g)",
+        "fat_g": "Fat (g)",
+    })
+
+    # Tabs for a cleaner layout
+    tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
+
+    with tab_plan:
+        st.dataframe(
+            plan_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Day":        st.column_config.NumberColumn(format="%d", width="small"),
+                "Meal":       st.column_config.TextColumn(width="small"),
+                "Recipe":     st.column_config.TextColumn(width="large"),
+                "Calories":   st.column_config.NumberColumn(format="%d", width="small"),
+                "Protein (g)":st.column_config.NumberColumn(format="%d", width="small"),
+                "Carbs (g)":  st.column_config.NumberColumn(format="%d", width="small"),
+                "Fat (g)":    st.column_config.NumberColumn(format="%d", width="small"),
+            },
+        )
+
+        dl1, _ = st.columns([0.5, 0.5])
+        with dl1:
+            st.download_button(
+                "Download Plan (CSV)",
+                data=plan_display.to_csv(index=False).encode(),
+                file_name="mealplan.csv",
+                mime="text/csv",
+                use_container_width=True,
             )
-            st.markdown("**Daily totals**")
-            st.dataframe(day_summary, use_container_width=True, hide_index=True)
 
-    with c2:
-        st.markdown("**Shopping list**")
-        
-        st.caption(f"Scaled for {st.session_state.get('household_size', 1)} person(s)")
+    with tab_shop:
+        left, right = st.columns([0.65, 0.35])
 
-        # Pantry split (re-use your helpers)
-        pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
-        annotate = st.session_state.get("show_pantry_note", False)
-        need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
+        with right:
+            # Quick inline adjuster for scaling (updates list live)
+            new_hh = st.number_input(
+                "People you’re cooking for",
+                min_value=1, max_value=12, step=1, value=hh_size,
+                help="Rescales quantities in the shopping list only."
+            )
+            if new_hh != hh_size:
+                st.session_state["household_size"] = int(new_hh)
+                hh_size = int(new_hh)
+                df_shop2 = consolidate_shopping_list(plan, household_size=hh_size)
+                need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-        if annotate:
-            if not need_df.empty:
-                need_df_display = need_df.copy()
-                norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
-                need_df_display["item"] = need_df_display["item"].astype(str).apply(
-                    lambda x: f"{x} (have)" if x.lower() in norm_have else x
-                )
-                st.dataframe(need_df_display, use_container_width=True, hide_index=True)
+            st.caption("Pantry matching")
+            if pantry_items:
+                st.write(f"Matched against: {', '.join(pantry_items)}")
             else:
-                st.info("No items needed.")
-        else:
-            st.markdown("**Items to buy**")
-            st.dataframe(need_df, use_container_width=True, hide_index=True)
+                st.write("No pantry items entered.")
+
+        with left:
+            # Optional inline annotation view
+            if annotate:
+                if not need_df.empty:
+                    need_df_display = need_df.copy()
+                    norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
+                    need_df_display["item"] = need_df_display["item"].astype(str).apply(
+                        lambda x: f"{x} (have)" if x.lower() in norm_have else x
+                    )
+                    shop_display = need_df_display
+                else:
+                    shop_display = need_df
+            else:
+                shop_display = need_df
+
+            shop_display = shop_display.rename(columns={
+                "item": "Item",
+                "quantity": "Quantity",
+                "unit": "Unit",
+            })
+
+            st.dataframe(
+                shop_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Item":     st.column_config.TextColumn(width="large"),
+                    "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
+                    "Unit":     st.column_config.TextColumn(width="small"),
+                },
+            )
+
             with st.expander("Pantry items (matched)"):
-                if have_df.empty:
+                have_display = have_df.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
+                if have_display.empty:
                     st.write("No matches.")
                 else:
-                    st.dataframe(have_df, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        have_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Item":     st.column_config.TextColumn(width="large"),
+                            "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
+                            "Unit":     st.column_config.TextColumn(width="small"),
+                        },
+                    )
+
+        st.markdown("---")
+        st.download_button(
+            "Download Shopping List (CSV)",
+            data=df_shop2.rename(columns={"item":"Item","quantity":"Quantity","unit":"Unit"}).to_csv(index=False).encode(),
+            file_name="shopping_list.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    with tab_totals:
+        day_summary = (
+            plan_display.groupby("Day")[["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]]
+            .sum()
+            .reset_index()
+            .sort_values("Day")
+        )
+        st.dataframe(
+            day_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Day":        st.column_config.NumberColumn(format="%d", width="small"),
+                "Calories":   st.column_config.NumberColumn(format="%d", width="small"),
+                "Protein (g)":st.column_config.NumberColumn(format="%d", width="small"),
+                "Carbs (g)":  st.column_config.NumberColumn(format="%d", width="small"),
+                "Fat (g)":    st.column_config.NumberColumn(format="%d", width="small"),
+            },
+        )
+
 
     # Downloads
     st.markdown("---")
