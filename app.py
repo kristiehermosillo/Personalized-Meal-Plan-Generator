@@ -356,12 +356,23 @@ def make_filters_signature() -> str:
 
 sig = make_filters_signature()
 
-# --- Background generation controls (must be after use_ai and sig exist) ---
+# --- Background generation controls (after use_ai and sig exist) ---
+start_bg = False        # safety so the names always exist
+check_bg = False
+
 bg_col1, bg_col2 = st.columns([0.55, 0.45])
 with bg_col1:
-    start_bg = st.button("⏳ Generate in background (keep browsing)", use_container_width=True)
+    start_bg = st.button(
+        "⏳ Generate in background (keep browsing)",
+        use_container_width=True,
+        key="bg_start"
+    )
 with bg_col2:
-    check_bg = st.button("🔄 Check status", use_container_width=True)
+    check_bg = st.button(
+        "🔄 Check status",
+        use_container_width=True,
+        key="bg_check"
+    )
 
 if start_bg:
     payload = dict(
