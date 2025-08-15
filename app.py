@@ -168,13 +168,16 @@ view = st.sidebar.radio(
 )
 
 st.sidebar.markdown("### Plan controls")
+# Plan controls
 st.session_state.plan_locked = st.sidebar.checkbox(
     "🔒 Freeze this plan",
     value=st.session_state.get("plan_locked", False),
     help="When frozen, your plan won’t change until you click Generate again."
 )
 
-# Download + Load plan (dev only)
+st.sidebar.caption("Free: 3-day plan preview. Upgrade for 7 days + macros + PDF export.")
+
+# --- Dev tools (hidden for users) ---
 uploaded = None
 if DEV_MODE:
     if "plan" in st.session_state:
@@ -186,6 +189,7 @@ if DEV_MODE:
             mime="application/json",
             use_container_width=True
         )
+
     uploaded = st.sidebar.file_uploader(
         "⬆️ Import saved plan (JSON)",
         type=["json"],
@@ -290,6 +294,20 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
+# If a plan file was uploaded (Dev Mode), read it and set the current plan
+if uploaded is not None:
+    try:
+        file_bytes = uploaded.read()
+        loaded_plan = json.loads(file_bytes.decode("utf-8", errors="strict"))
+        if isinstance(loaded_plan, dict):
+            st.session_state.plan = loaded_plan
+            # mark that the current filters match this loaded plan
+            st.session_state.filters_sig = sig  # or recompute if you prefer
+            st.success("Plan loaded from file.")
+        else:
+            st.error("Invalid plan file format (expected a JSON object).")
+    except Exception as e:
+        st.error(f"Could not load plan: {e}")
 
 # Decide if we should (re)generate
 # Only generate when the user clicks the button.
