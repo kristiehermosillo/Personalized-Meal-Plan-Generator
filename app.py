@@ -364,7 +364,7 @@ elif view == "Weekly Overview":
         st.info("No plan data to summarize. Click **Generate / Regenerate plan** first.")
         st.stop()
 
-    df_shop2 = consolidate_shopping_list(plan, household_size=st.session_state.get("household_size", 1))
+    df_shop2 = consolidate_shopping_list(plan, household_size=int(st.session_state.get("household_size", 1)))
 
     c1, c2 = st.columns([0.6, 0.4])
     with c1:
