@@ -26,7 +26,7 @@ OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
 # --- JSON helpers used by generate_ai_menu_with_recipes ---
 def _extract_json(text: str) -> str:
-    """Pull the JSON object out of a response (handles code fences)."""
+    """Pull the JSON object from a model response (handles code fences & extra prose)."""
     t = (text or "").strip()
     if "```" in t:
         import re as _re
@@ -36,6 +36,7 @@ def _extract_json(text: str) -> str:
         m = _re.search(r"```(\s*.+?)```", t, flags=_re.S)
         if m:
             return m.group(1).strip()
+    # fallback: first '{' .. last '}'
     if "{" in t and "}" in t:
         start = t.find("{")
         end = t.rfind("}")
@@ -43,29 +44,48 @@ def _extract_json(text: str) -> str:
     return t
 
 def _clean_json(s: str) -> str:
-    """Light cleanup to reduce trivial JSON errors (dangling/duplicate commas)."""
+    """Lenient cleanup: remove trailing commas, double commas, stray commas before ]/}."""
     import re as _re
-    s = _re.sub(r",\s*(\]|\})", r"\1", s)  # remove trailing commas
-    s = _re.sub(r",\s*,", ",", s)          # collapse double commas
+    if not s:
+        return s
+    # remove trailing commas before ] or }
+    s = _re.sub(r",\s*(\]|\})", r"\1", s)
+    # collapse double commas
+    s = _re.sub(r",\s*,", ",", s)
+    # remove commas right after '[' or '{'
+    s = _re.sub(r"(\[|\{)\s*,\s*", r"\1", s)
     return s.strip()
 
+def _safe_json_load(cleaned: str, *, day_idx: int | None = None, raw: str = "") -> dict:
+    """Try multiple parses; raise ValueError with good context if it still fails."""
+    import json as _json
+    import re as _re
 
-def call_openrouter(messages: list[dict], model: str = OPENROUTER_MODEL, max_tokens: int = 1200) -> dict:
-    api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
-    if not api_key:
-        raise RuntimeError("Missing OPENROUTER_API_KEY")
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-        # Many OpenRouter models support this; if they don't, it's ignored.
-        "response_format": {"type": "json_object"},
-    }
-    r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    # Try normal parse
+    try:
+        parsed = _json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else {"plan": parsed}
+    except Exception:
+        pass
+
+    # Try a second pass: tighten commas again
+    cleaned2 = _re.sub(r",\s*,", ",", cleaned)
+    try:
+        parsed = _json.loads(cleaned2)
+        return parsed if isinstance(parsed, dict) else {"plan": parsed}
+    except Exception:
+        # Last chance: if the model returned an array, wrap it
+        if cleaned2.lstrip().startswith("[") and cleaned2.rstrip().endswith("]"):
+            try:
+                arr = _json.loads(cleaned2)
+                return {"plan": arr}
+            except Exception:
+                pass
+
+    ctx = f" (day {day_idx})" if day_idx else ""
+    snippet = (raw or cleaned)[:6000]
+    raise ValueError(f"Invalid JSON{ctx}. Snippet:\n{snippet}")
+
 
 # ---- helpers ----
 def get_day_slots(meals_per_day: int) -> list[str]:
@@ -335,20 +355,23 @@ def generate_ai_menu_with_recipes(
                 },
             ]
             try:
-                resp = call_openrouter(messages, model=model, max_tokens=1400)
+                resp = call_openrouter(day_messages, model=model, max_tokens=1400)
                 raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
-                cleaned = _clean_json(_extract_json(raw))
-                try:
-                    parsed = json.loads(cleaned)
-                except Exception:
-                    # last-ditch tiny cleanup
-                    import re as _re
-                    cleaned2 = _re.sub(r",\s*,", ",", cleaned)
-                    parsed = json.loads(cleaned2)  # may still throw
-                return raw, parsed
             except Exception as e:
                 st.error(f"AI request failed for day {day_idx}: {e}")
-                return None, None
+                return {}
+            
+            # ---- extract & parse robustly
+            cleaned = _clean_json(_extract_json(raw))
+            try:
+                parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
+            except ValueError as e:
+                st.error(str(e))
+                with st.expander(f"Show AI raw output (day {day_idx})"):
+                    st.code(raw[:6000])
+                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
+                    st.code(cleaned[:6000], language="json")
+                return {}
 
         # try once, then retry with stronger hint if we get duplicates/empty
         raw, parsed = _ask_once()
