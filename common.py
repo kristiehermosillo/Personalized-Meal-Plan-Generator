@@ -236,63 +236,96 @@ def generate_ai_menu_with_recipes(
         },
     ]
 
-    # ---- Call model
-    try:
-        resp = call_openrouter(messages, model=model, max_tokens=2200)
-        raw = (resp.get("choices", [{}])[0]
-                   .get("message", {})
-                   .get("content", "") or "")
-    except Exception as e:
-        st.error(f"AI request failed: {e}")
-        return {}
-
-    # ---- Extract JSON from possible markdown / extra text
-    import re as _re
+    # ---- Call the model one day at a time to avoid truncation
+    plan_dict: dict[int, list[dict]] = {}
+    for day_idx in range(1, days + 1):
+        day_constraints = dict(constraints)  # shallow copy
+        day_constraints["days"] = 1
+        # tell the model which exact day to produce
+        day_constraints["force_day"] = day_idx
     
-    def _extract_json(text: str) -> str:
-        t = text.strip()
-        if "```" in t:
-            m = _re.search(r"```json\s*(.+?)```", t, flags=_re.S | _re.I)
-            if m: 
-                return m.group(1).strip()
-            m = _re.search(r"```(\s*.+?)```", t, flags=_re.S)
-            if m:
-                return m.group(1).strip()
-        if "{" in t and "}" in t:
-            start = t.find("{")
-            end = t.rfind("}")
-            return t[start:end+1]
-        return t
+        day_messages = [
+            {"role": "system", "content": system_msg},
+            {
+                "role": "user",
+                "content": (
+                    "Schema (strict):\n"
+                    f"{json.dumps(schema)}\n\n"
+                    "Constraints for THIS response only:\n"
+                    f"{json.dumps(day_constraints)}\n\n"
+                    "Return ONLY one day's JSON (plan array with a single object for this day)."
+                ),
+            },
+        ]
     
-    def _clean_json(text: str) -> str:
-        # normalize quotes / spaces
-        t = (text
-             .replace("\u201c", '"').replace("\u201d", '"')  # smart double quotes
-             .replace("\u2018", "'").replace("\u2019", "'")  # smart single quotes
-             .replace("\xa0", " ")                           # non‑breaking space
-        )
-        # remove trailing commas before ] or }
-        t = _re.sub(r",\s*(\])", r"\1", t, flags=_re.S)
-        t = _re.sub(r",\s*(\})", r"\1", t, flags=_re.S)
-        return t.strip()
-    
-    cleaned = _clean_json(_extract_json(raw))
-    
-    # ---- Parse and normalize (with a fallback attempt)
-    try:
-        parsed = json.loads(cleaned)
-    except Exception:
-        # One more gentle pass: collapse repeated commas/newlines, then try again
-        cleaned2 = _re.sub(r",\s*,", ",", cleaned)
         try:
-            parsed = json.loads(cleaned2)
+            # Smaller max_tokens per call avoids cutoff
+            resp = call_openrouter(day_messages, model=model, max_tokens=1400)
+            raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
         except Exception as e:
-            st.error("AI returned non‑JSON or invalid JSON. Enable **Generate new recipes** again to retry.")
-            with st.expander("Show AI raw output"):
-                st.code(raw[:6000])
-            with st.expander("Show cleaned JSON we tried to parse"):
-                st.code(cleaned[:6000], language="json")
+            st.error(f"AI request failed for day {day_idx}: {e}")
             return {}
+    
+        cleaned = _clean_json(_extract_json(raw))
+    
+        import re as _re
+        try:
+            parsed = json.loads(cleaned)
+        except Exception:
+            cleaned2 = _re.sub(r",\s*,", ",", cleaned)
+            try:
+                parsed = json.loads(cleaned2)
+            except Exception:
+                st.error(f"AI returned invalid JSON for day {day_idx}.")
+                with st.expander(f"Show AI raw output (day {day_idx})"):
+                    st.code(raw[:6000])
+                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
+                    st.code(cleaned[:6000], language="json")
+                return {}
+    
+        # normalize one day’s block into plan_dict
+        blocks = parsed.get("plan", [])
+        if not isinstance(blocks, list) or not blocks:
+            st.error(f"No plan data for day {day_idx}.")
+            with st.expander(f"Show parsed JSON (day {day_idx})"):
+                st.code(json.dumps(parsed, indent=2))
+            return {}
+    
+        block = blocks[0]
+        d = int(block.get("day", day_idx))
+        meals_out: list[dict] = []
+        for m in block.get("meals", []):
+            r = m.get("recipe", {}) or {}
+            meals_out.append({
+                "name": r.get("name", "Recipe"),
+                "course": (r.get("course") or m.get("slot") or "any").lower(),
+                "cuisine": r.get("cuisine", ""),
+                "calories": int(r.get("calories") or 0),
+                "macros": {
+                    "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
+                    "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
+                    "fat_g":     int((r.get("macros") or {}).get("fat_g")     or 0),
+                },
+                "ingredients": [
+                    {
+                        "item": str(i.get("item","")).strip(),
+                        "qty":  i.get("qty", 1),
+                        "unit": str(i.get("unit","")).strip(),
+                    }
+                    for i in (r.get("ingredients") or [])
+                    if str(i.get("item","")).strip()
+                ],
+                "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
+            })
+    
+        if meals_out:
+            plan_dict[d] = meals_out
+    
+    # if we got here, we have a full plan_dict
+    if not plan_dict:
+        st.error("AI didn’t return any usable meals. Try again or switch to 'Pick from built‑in'.")
+    return plan_dict
+
 
     plan_dict: dict[int, list[dict]] = {}
     try:
