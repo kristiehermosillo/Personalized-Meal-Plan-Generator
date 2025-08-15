@@ -340,10 +340,11 @@ def generate_ai_menu_with_recipes(
     }
 
     system_msg = (
-        "You are a meal planning chef. Generate complete, practical recipes with common ingredients. "
-        "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
-        "Return JSON only. No markdown. No prose."
-    )
+    "You are a meal planning chef. Generate complete, practical recipes with common ingredients. "
+    "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
+    "Return JSON only. No markdown. No prose. Use double quotes everywhere. "
+    "All units must be strings like \"g\", \"tbsp\", \"tsp\", \"cup\"."
+)
 
     plan_dict: dict[int, list[dict]] = {}
     seen_recipe_names: set[str] = set()
