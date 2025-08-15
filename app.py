@@ -494,13 +494,31 @@ elif view == "Weekly Overview":
     annotate = st.session_state.get("show_pantry_note", False)
     need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-    # Quick summary chips across the top
+    # Quick summary pills across the top (no truncation)
     st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
-    cols = st.columns(min(days, 7))
-    for i, col in enumerate(cols, start=1):
+    
+    def _short_kcal(n: int) -> str:
+        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+    
+    badges = []
+    for i in range(1, days + 1):
         sub = df_plan2[df_plan2["day"] == i]
         kcal = int(sub["calories"].sum()) if not sub.empty else 0
-        col.metric(f"Day {i}", f"{kcal:,} kcal")
+        badges.append(f"<div class='pill'><span>Day {i}</span><b>{_short_kcal(kcal)} kcal</b></div>")
+    
+    st.markdown(
+        """
+        <style>
+          .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
+          .pill{padding:10px 12px;border:1px solid rgba(255,255,255,0.12);
+                border-radius:12px;background:rgba(255,255,255,0.03)}
+          .pill span{opacity:.7;margin-right:8px}
+          .pill b{font-weight:600}
+        </style>
+        <div class="pillrow">""" + "".join(badges) + "</div>",
+        unsafe_allow_html=True
+    )
+
 
     # Friendlier column names
     plan_display = df_plan2.rename(columns={
