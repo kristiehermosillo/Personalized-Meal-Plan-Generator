@@ -24,6 +24,35 @@ except Exception:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
+# --- JSON helpers used by generate_ai_menu_with_recipes ---
+
+def _extract_json(text: str) -> str:
+    """Pull the JSON object out of a response (handles code fences)."""
+    t = (text or "").strip()
+    if "```" in t:
+        import re as _re
+        m = _re.search(r"```json\s*(.+?)```", t, flags=_re.S | _re.I)
+        if m:
+            return m.group(1).strip()
+        m = _re.search(r"```(\s*.+?)```", t, flags=_re.S)
+        if m:
+            return m.group(1).strip()
+    if "{" in t and "}" in t:
+        start = t.find("{")
+        end = t.rfind("}")
+        return t[start : end + 1]
+    return t
+
+
+def _clean_json(s: str) -> str:
+    """Light cleanup to reduce trivial JSON errors (dangling/duplicate commas)."""
+    import re as _re
+    # remove trailing commas before ] or }
+    s = _re.sub(r",\s*(\]|\})", r"\1", s)
+    # collapse double commas
+    s = _re.sub(r",\s*,", ",", s)
+    return s.strip()
+
 def call_openrouter(messages: list[dict], model: str = OPENROUTER_MODEL, max_tokens: int = 1200) -> dict:
     api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
     if not api_key:
