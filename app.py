@@ -181,6 +181,16 @@ st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PD
 uploaded = st.sidebar.file_uploader("⬆️ Load plan (JSON)", type=["json"])
 
 st.sidebar.header("Your Preferences")
+# People you are cooking for
+st.session_state.household_size = int(st.sidebar.number_input(
+    "People you are cooking for",
+    min_value=1,
+    max_value=12,
+    value=int(st.session_state.get("household_size", 1)),
+    step=1,
+    help="Used to scale the shopping list"
+))
+
 diet_flags = st.sidebar.multiselect("Dietary style",
     ["vegetarian","vegan","gluten-free","dairy-free","pescatarian","low-carb"], default=[])
 allergies  = st.sidebar.text_input("Allergies (comma-separated)", "")
@@ -354,7 +364,7 @@ elif view == "Weekly Overview":
         st.info("No plan data to summarize. Click **Generate / Regenerate plan** first.")
         st.stop()
 
-    df_shop2 = consolidate_shopping_list(plan)
+    df_shop2 = consolidate_shopping_list(plan, household_size=st.session_state.get("household_size", 1))
 
     c1, c2 = st.columns([0.6, 0.4])
     with c1:
@@ -373,6 +383,8 @@ elif view == "Weekly Overview":
 
     with c2:
         st.markdown("**Shopping list**")
+        
+st.caption(f"Scaled for {st.session_state.get('household_size', 1)} person(s)")
 
         # Pantry split (re-use your helpers)
         pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
