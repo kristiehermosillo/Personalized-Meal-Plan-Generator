@@ -3,6 +3,8 @@ import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
 import json
 
+DEV_MODE = bool(st.secrets.get("DEV_MODE", False))
+
 from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
     RECIPE_DB, Recipe,
@@ -167,20 +169,29 @@ view = st.sidebar.radio(
 
 st.sidebar.markdown("### Plan controls")
 st.session_state.plan_locked = st.sidebar.checkbox(
-    "🔒 Lock this plan (don’t auto-change)",
-    value=st.session_state.get("plan_locked", False)
+    "🔒 Freeze this plan",
+    value=st.session_state.get("plan_locked", False),
+    help="When frozen, your plan won’t change until you click Generate again."
 )
 
-# Download + Load JSON live in sidebar too
-if "plan" in st.session_state:
-    dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
-    st.sidebar.download_button(
-        "⬇️ Download plan (JSON)",
-        data=dl_plan,
-        file_name="mealplan.json",
-        mime="application/json",
-        use_container_width=True
+# Download + Load plan (dev only)
+uploaded = None
+if DEV_MODE:
+    if "plan" in st.session_state:
+        dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
+        st.sidebar.download_button(
+            "⬇️ Export plan (JSON)",
+            data=dl_plan,
+            file_name="mealplan.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    uploaded = st.sidebar.file_uploader(
+        "⬆️ Import saved plan (JSON)",
+        type=["json"],
+        help="Use a file exported with the button above."
     )
+
 st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
 uploaded = st.sidebar.file_uploader("⬆️ Load plan (JSON)", type=["json"])
@@ -249,18 +260,19 @@ st.subheader(f"Your {days}-day plan")
 # Generate button (back in main content area)
 gen_clicked = st.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
 
-# AI toggle still Premium-only
-use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True, key="use_ai_toggle")
-
-ai_mode = "Pick from built‑in"
-if use_ai:
-    ai_mode = st.radio(
-        "AI mode",
-        ["Pick from built‑in", "Generate new recipes"],
+# Friendlier wording for normal users (no “AI” language)
+if st.session_state.is_premium:
+    source_choice = st.radio(
+        "Recipe source",
+        ["From our cookbook", "Create new recipes"],
         index=0,
         horizontal=True,
-        help="Pick from your recipe database, or ask AI to create new recipes with ingredients & steps.",
+        help="“From our cookbook” uses our built-in recipes. “Create new recipes” crafts new dishes for you."
     )
+    use_ai = (source_choice == "Create new recipes")
+else:
+    use_ai = False
+    st.caption("Upgrade to create brand-new recipes each week.")
 
 # Create a signature of “inputs that define a plan”
 def make_filters_signature() -> str:
