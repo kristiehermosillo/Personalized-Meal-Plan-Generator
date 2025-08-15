@@ -528,35 +528,50 @@ def plan_to_dataframe(plan: Dict[int, List[dict]], meals_per_day: int) -> _pd.Da
             })
     return _pd.DataFrame(rows)
 
-def consolidate_shopping_list(plan: Dict[int, List[dict]]) -> _pd.DataFrame:
+def consolidate_shopping_list(plan: Dict[int, List[dict]], household_size: int = 1) -> _pd.DataFrame:
     """
     Aggregate ingredients across the whole plan into a shopping list.
-    Robust to missing qty/unit/types.
+    Scales quantities for the given household_size using recipe['servings'] (default 1).
     """
     from collections import defaultdict
     totals: Dict[Tuple[str, str], float] = defaultdict(float)
+
+    hh = max(1, int(household_size or 1))
 
     for meals in (plan or {}).values():
         for rec in meals or []:
             if not rec:
                 continue
+
+            # servings per recipe (defaults to 1 if missing)
+            try:
+                recipe_servings = int(rec.get("servings") or 1)
+            except Exception:
+                recipe_servings = 1
+
+            # multiplier = people / servings-per-recipe
+            mult = hh / max(1, recipe_servings)
+
             for ing in rec.get("ingredients", []) or []:
                 item = str(ing.get("item", "")).strip()
                 if not item:
                     continue
                 unit = str(ing.get("unit", "")).strip()
-                # try to parse numeric qty; default to 1.0
+
                 qty = ing.get("qty", 1.0)
                 try:
                     qty = float(qty)
                 except Exception:
                     qty = 1.0
+
+                qty *= mult
                 key = (item.lower(), unit)
                 totals[key] += qty
 
     rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
             for (item, unit), qty in sorted(totals.items())]
     return _pd.DataFrame(rows)
+
 
 # -------------------
 # Pantry helpers
