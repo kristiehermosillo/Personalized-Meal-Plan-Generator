@@ -83,6 +83,9 @@ def _clean_json(s: str) -> str:
     s = re.sub(r",\s*([\]}])", r"\1", s)
     s = re.sub(r",\s*,", ",", s)
     s = re.sub(r"([\[{])\s*,\s*", r"\1", s)
+        # heal missing end quotes like: "key": "value }
+    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*}', r'\1\2"}', s)
+    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*,', r'\1\2",', s)
     return s.strip()
 
 def _safe_json_load(cleaned: str, *, day_idx: int | None = None, raw: str = "") -> dict:
@@ -401,7 +404,7 @@ def generate_ai_menu_with_recipes(
                 },
             ]
             try:
-                resp = call_openrouter(messages, model=model, max_tokens=1400)
+                resp = call_openrouter(messages, model=model, max_tokens=1800)
                 raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
             except Exception as e:
                 st.error(f"AI request failed for day {day_idx}: {e}")
