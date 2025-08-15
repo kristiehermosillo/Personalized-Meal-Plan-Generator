@@ -5,42 +5,22 @@ import streamlit as st
 import pandas as pd
 import requests
 
-from recipe_db import RECIPE_DB, Recipe  # keep using Recipe from recipe_db
+from recipe_db import RECIPE_DB, Recipe
 
 APP_NAME = "MealPlan Genie"
 FREE_DAYS = 3
 PREMIUM_DAYS = 7
 
-# Backend URL (Stripe etc.)
+# Backend URL
 DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
-def call_openrouter(messages, model=OPENROUTER_MODEL, max_tokens=1200, temperature=0):
-    """Minimal OpenRouter client for Streamlit Cloud."""
-    api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY missing in env or secrets")
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": float(temperature or 0),
-    }
-    r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
-    r.raise_for_status()
-    return r.json()
-
-# Try to wake Render backend (no-op if not deployed)
+# Try to wake backend
 try:
     requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=5)
 except Exception:
     pass
 
-# ---- AI (OpenRouter) optional ----
+# AI settings
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
@@ -64,7 +44,7 @@ def call_openrouter(messages, model=OPENROUTER_MODEL, max_tokens=1200, temperatu
     r.raise_for_status()
     return r.json()
 
-# --- JSON helpers used by generate_ai_menu_with_recipes ---
+# JSON helpers used by generate_ai_menu_with_recipes
 def _extract_json(text: str) -> str:
     """Return the largest JSON object in the text. Ignores prose and code fences."""
     t = (text or "").strip()
@@ -98,18 +78,12 @@ def _clean_json(s: str) -> str:
     """Lenient cleanup for common model quirks."""
     if not s:
         return s
-    # normalize quotes
     s = s.replace("“", '"').replace("”", '"').replace("’", "'")
-    # convert Python literals
     s = s.replace("None", "null").replace("True", "true").replace("False", "false")
-    # fix trailing commas
     s = re.sub(r",\s*([\]}])", r"\1", s)
-    # collapse double commas
     s = re.sub(r",\s*,", ",", s)
-    # remove commas right after opening brace or bracket
     s = re.sub(r"([\[{])\s*,\s*", r"\1", s)
     return s.strip()
-
 
 def _safe_json_load(cleaned: str, *, day_idx: int | None = None, raw: str = "") -> dict:
     """Try multiple parses; raise ValueError with good context if it still fails."""
