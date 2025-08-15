@@ -153,6 +153,51 @@ def pick_meals_ai(filtered: List[Recipe], meals_per_day: int, days: int, cal_tar
     except Exception as e:
         st.warning(f"AI planner failed; using default. {e}")
         return pick_meals(filtered, meals_per_day, days, cal_target)
+
+def _find_alternative_recipe(
+    *, 
+    target_slot: str, 
+    diets: list[str], 
+    allergies: list[str], 
+    exclusions: list[str], 
+    cuisines: list[str], 
+    seen_names: set[str]
+) -> dict | None:
+    """
+    Fallback from your built-in RECIPE_DB:
+      - respects filters
+      - matches course (slot) if possible
+      - not already used this week
+    Returns a 'recipe-like' dict compatible with plan structure, or None.
+    """
+    slot_key = target_slot.lower()
+    pool = [
+        r for r in RECIPE_DB 
+        if recipe_matches(r, diets, allergies, exclusions, cuisines)
+        and r.get("name") not in seen_names
+        and (r.get("course", "any").lower() in (slot_key, "any"))
+    ]
+    if not pool:
+        return None
+    # Convert a RECIPE_DB recipe into the “recipe-like” structure the app expects
+    r = random.choice(pool)
+    return {
+        "name": r["name"],
+        "course": r.get("course", "any"),
+        "cuisine": r.get("cuisine", ""),
+        "calories": int(r.get("calories", 0) or 0),
+        "macros": {
+            "protein_g": int(r.get("macros", {}).get("protein_g", 0) or 0),
+            "carbs_g":   int(r.get("macros", {}).get("carbs_g", 0) or 0),
+            "fat_g":     int(r.get("macros", {}).get("fat_g", 0) or 0),
+        },
+        "ingredients": [
+            {"item": ing.get("item",""), "qty": ing.get("qty", 1), "unit": ing.get("unit","")}
+            for ing in r.get("ingredients", [])
+        ],
+        "steps": [s for s in r.get("steps", [])],
+    }
+
 # === AI: generate brand-new recipes with ingredients & steps ===
 def generate_ai_menu_with_recipes(
     days: int,
@@ -167,12 +212,23 @@ def generate_ai_menu_with_recipes(
     """
     Ask the model to CREATE recipes + a weekly plan and return a dict:
       { 1: [recipe_like, ...], 2: [...], ... }
-    If the model doesn't return usable JSON, this function shows a clear error
-    and returns {} (so the UI can tell you it failed).
+    This version enforces variety across days (no name repeats, protein rotation).
     """
+
+    def _primary_protein(ingredients: list[dict]) -> str:
+        txt = " ".join(str(i.get("item","")).lower() for i in (ingredients or []))
+        for k in [
+            "chicken", "turkey", "beef", "pork", "salmon", "tuna", "shrimp",
+            "tofu", "tempeh", "egg", "eggs", "chickpea", "chickpeas",
+            "lentil", "lentils", "beans"
+        ]:
+            if k in txt:
+                return k
+        return ""
+
     slots = get_day_slots(meals_per_day)
-    constraints = {
-        "days": days,
+    base_constraints = {
+        "days": days,  # informational
         "slots": slots,  # e.g. ["Breakfast","Lunch","Dinner"]
         "diets": diets or [],
         "allergies": allergies or [],
@@ -181,7 +237,6 @@ def generate_ai_menu_with_recipes(
         "daily_calorie_target": calorie_target,
     }
 
-    # What we want back
     schema = {
       "type": "object",
       "properties": {
@@ -241,117 +296,123 @@ def generate_ai_menu_with_recipes(
     }
 
     system_msg = (
-        "You are a meal-planning chef. Generate complete, practical recipes "
+        "You are a meal‑planning chef. Generate complete, practical recipes "
         "that use widely available ingredients. Use simple units (cup, tbsp, tsp, g). "
-        "Respect dietary/allergy constraints. Match the requested slots "
-        "(breakfast/lunch/dinner). Aim near the daily calorie target if provided.\n\n"
-        "RETURN ONLY RAW JSON. Do NOT wrap in code fences. Do NOT add commentary."
+        "Respect dietary/allergy constraints. Match the requested slots. "
+        "Aim near the daily calorie target if provided. "
+        "Return ONLY raw JSON (no code fences, no commentary)."
     )
 
-    messages = [
-        {"role": "system", "content": system_msg},
-        {
-            "role": "user",
-            "content": (
-                "Schema (strict):\n"
-                f"{json.dumps(schema)}\n\n"
-                "Constraints:\n"
-                f"{json.dumps(constraints)}\n\n"
-                "Again, return ONLY the JSON object that matches the schema above."
-            ),
-        },
-    ]
-
-    # ---- Call the model one day at a time to avoid truncation
+    # Rolling memory to enforce variety
     plan_dict: dict[int, list[dict]] = {}
+    seen_recipe_names: set[str] = set()
+    seen_primary_proteins: list[str] = []  # keep last few to rotate proteins
+
+    # Generate one day at a time so we can pass 'ban' lists forward
     for day_idx in range(1, days + 1):
-        day_constraints = dict(constraints)  # shallow copy
+        # tighten constraints for THIS day
+        day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
-        # tell the model which exact day to produce
         day_constraints["force_day"] = day_idx
-    
-        day_messages = [
-            {"role": "system", "content": system_msg},
-            {
-                "role": "user",
-                "content": (
+        day_constraints["ban_recipes"] = sorted(seen_recipe_names)  # exact names to avoid
+        # avoid last 2 primary proteins (soft)
+        day_constraints["avoid_primary_proteins"] = list(dict.fromkeys(seen_primary_proteins[-2:]))
+
+        def _ask_once(extra_hint: str = "") -> tuple[str, dict] | tuple[None, None]:
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content":
                     "Schema (strict):\n"
-                    f"{json.dumps(schema)}\n\n"
-                    "Constraints for THIS response only:\n"
-                    f"{json.dumps(day_constraints)}\n\n"
-                    "Return ONLY one day's JSON (plan array with a single object for this day)."
-                ),
-            },
-        ]
-    
-        try:
-            # Smaller max_tokens per call avoids cutoff
-            resp = call_openrouter(day_messages, model=model, max_tokens=1400)
-            raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
-        except Exception as e:
-            st.error(f"AI request failed for day {day_idx}: {e}")
-            return {}
-    
-        try:
-            cleaned = _clean_json(_extract_json(raw))
-        except NameError:
-            # Fallback if the helper isn't in scope for any reason
-            cleaned = _extract_json(raw)
-    
-        import re as _re
-        try:
-            parsed = json.loads(cleaned)
-        except Exception:
-            cleaned2 = _re.sub(r",\s*,", ",", cleaned)
-            try:
-                parsed = json.loads(cleaned2)
-            except Exception:
-                st.error(f"AI returned invalid JSON for day {day_idx}.")
-                with st.expander(f"Show AI raw output (day {day_idx})"):
-                    st.code(raw[:6000])
-                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
-                    st.code(cleaned[:6000], language="json")
-                return {}
-    
-        # normalize one day’s block into plan_dict
-        blocks = parsed.get("plan", [])
-        if not isinstance(blocks, list) or not blocks:
-            st.error(f"No plan data for day {day_idx}.")
-            with st.expander(f"Show parsed JSON (day {day_idx})"):
-                st.code(json.dumps(parsed, indent=2))
-            return {}
-    
-        block = blocks[0]
-        d = int(block.get("day", day_idx))
-        meals_out: list[dict] = []
-        for m in block.get("meals", []):
-            r = m.get("recipe", {}) or {}
-            meals_out.append({
-                "name": r.get("name", "Recipe"),
-                "course": (r.get("course") or m.get("slot") or "any").lower(),
-                "cuisine": r.get("cuisine", ""),
-                "calories": int(r.get("calories") or 0),
-                "macros": {
-                    "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
-                    "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
-                    "fat_g":     int((r.get("macros") or {}).get("fat_g")     or 0),
+                    + json.dumps(schema)
+                    + "\n\nConstraints for THIS response only:\n"
+                    + json.dumps(day_constraints)
+                    + "\n\nRules to enforce variety:\n"
+                    + "- Never repeat an exact recipe name in any other day. Do not use any name in 'ban_recipes'.\n"
+                    + "- Try to rotate the main protein across days; prefer NOT to use any in 'avoid_primary_proteins'.\n"
+                    + "- Vary breakfasts over the week (oats/yogurt/eggs/smoothies, etc.).\n"
+                    + extra_hint
+                    + "\n\nReturn ONLY one day's JSON (a single item in 'plan' for 'day')."
                 },
-                "ingredients": [
-                    {
-                        "item": str(i.get("item","")).strip(),
-                        "qty":  i.get("qty", 1),
-                        "unit": str(i.get("unit","")).strip(),
-                    }
-                    for i in (r.get("ingredients") or [])
-                    if str(i.get("item","")).strip()
-                ],
-                "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
-            })
-    
-        if meals_out:
-            plan_dict[d] = meals_out
-    
-    # if we got here, we have a full plan_dict
+            ]
+            try:
+                resp = call_openrouter(messages, model=model, max_tokens=1400)
+                raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
+                cleaned = _clean_json(_extract_json(raw))
+                try:
+                    parsed = json.loads(cleaned)
+                except Exception:
+                    # last-ditch tiny cleanup
+                    import re as _re
+                    cleaned2 = _re.sub(r",\s*,", ",", cleaned)
+                    parsed = json.loads(cleaned2)  # may still throw
+                return raw, parsed
+            except Exception as e:
+                st.error(f"AI request failed for day {day_idx}: {e}")
+                return None, None
+
+        # try once, then retry with stronger hint if we get duplicates/empty
+        raw, parsed = _ask_once()
+        if parsed is None:
+            return {}
+
+        def _normalize_day(parsed_json: dict) -> list[dict]:
+            blocks = parsed_json.get("plan", [])
+            if not isinstance(blocks, list) or not blocks:
+                return []
+            block = blocks[0]
+            meals_out: list[dict] = []
+            for m in block.get("meals", []):
+                r = m.get("recipe", {}) or {}
+                meals_out.append({
+                    "name": r.get("name", "Recipe"),
+                    "course": (r.get("course") or m.get("slot") or "any").lower(),
+                    "cuisine": r.get("cuisine", ""),
+                    "calories": int(r.get("calories") or 0),
+                    "macros": {
+                        "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
+                        "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
+                        "fat_g":     int((r.get("macros") or {}).get("fat_g")     or 0),
+                    },
+                    "ingredients": [
+                        {
+                            "item": str(i.get("item","")).strip(),
+                            "qty":  i.get("qty", 1),
+                            "unit": str(i.get("unit","")).strip(),
+                        }
+                        for i in (r.get("ingredients") or [])
+                        if str(i.get("item","")).strip()
+                    ],
+                    "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
+                })
+            return meals_out
+
+        meals_out = _normalize_day(parsed)
+
+        # drop any exact name repeats
+        meals_out = [m for m in meals_out if m.get("name","").strip() and m["name"] not in seen_recipe_names]
+
+        # if we lost everything or still too similar, retry once with stronger hint
+        if not meals_out:
+            raw, parsed = _ask_once(extra_hint="\n- You repeated recipe names or returned nothing. Replace with different recipes and ensure variety.")
+            if parsed is None:
+                return {}
+            meals_out = _normalize_day(parsed)
+            meals_out = [m for m in meals_out if m.get("name","").strip() and m["name"] not in seen_recipe_names]
+
+        if not meals_out:
+            st.error(f"No usable meals for day {day_idx}.")
+            with st.expander(f"Show AI raw output (day {day_idx})"):
+                st.code((raw or "")[:6000])
+            return {}
+
+        # update memory
+        plan_dict[day_idx] = meals_out
+        for m in meals_out:
+            seen_recipe_names.add(m["name"])
+            prot = _primary_protein(m.get("ingredients"))
+            if prot:
+                seen_primary_proteins.append(prot)
+
     if not plan_dict:
         st.error("AI didn’t return any usable meals. Try again or switch to 'Pick from built‑in'.")
     return plan_dict
