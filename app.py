@@ -10,10 +10,6 @@ from common import (
     pick_meals, pick_meals_ai,                 # keep both
     generate_ai_menu_with_recipes              # <-- include THIS here
 )
-
-
-from common import generate_ai_menu_with_recipes
-
 # --- Planner fallback (ensures symbol exists even if AI import fails) ---
 try:
     pick_meals      # imported above
@@ -298,24 +294,14 @@ if uploaded is not None:
 should_generate = False
 existing_plan = st.session_state.get("plan")
 
-if ("plan" not in st.session_state) or (not existing_plan):
-    # First-time or previously empty: generate once
-    should_generate = True
-
-if ("plan" not in st.session_state) or (not existing_plan):
-    # First-time or previously empty: generate once
+if not existing_plan:
     should_generate = True
 elif gen_clicked:
-    # User explicitly wants a new plan
     should_generate = True
-elif not st.session_state.get("plan_locked", False):
-    # If not locked and inputs changed, auto-update
-    if st.session_state.get("filters_sig") != sig:
-        should_generate = True
-else:
-    # Locked, but inputs differ → warn once
-    if st.session_state.get("filters_sig") != sig:
-        st.info("Your filters changed, but the plan is locked. Click **Generate / Regenerate** to update.")
+elif not st.session_state.get("plan_locked", False) and st.session_state.get("filters_sig") != sig:
+    should_generate = True
+elif st.session_state.get("plan_locked", False) and st.session_state.get("filters_sig") != sig:
+    st.info("Your filters changed, but the plan is locked. Click Generate or Regenerate to update.")
 
 if should_generate:
     if use_ai and ai_mode == "Generate new recipes":
@@ -349,7 +335,6 @@ df_plan = plan_to_dataframe(plan, meals_per_day)
 # ---- View renderer (single-file, robust) ----
 st.markdown("---")
 plan = st.session_state.plan
-meals_per_day = len(plan[1]) if plan.get(1) else 3
 
 from common import get_day_slots, plan_to_dataframe, consolidate_shopping_list
 from recipe_db import RECIPE_DB
