@@ -80,8 +80,13 @@ except Exception:
 
 # ---- Session bootstrap ----
 for k, v in {
-    "is_premium": False, "calorie_target": 2000,
-    "last_session_id": None, "used_ai_prev": False
+    "is_premium": False,
+    "calorie_target": 2000,
+    "last_session_id": None,
+    "used_ai_prev": False,
+    "plan": {},              # <- add this so plan always exists
+    "filters_sig": None,
+    "plan_locked": False,
 }.items():
     st.session_state.setdefault(k, v)
 
@@ -308,9 +313,10 @@ if should_generate:
         )
     st.session_state.filters_sig = sig
 
-# Use the plan from session
-plan = st.session_state.plan
-df_plan = plan_to_dataframe(plan, meals_per_day)
+# Use the plan from session (safe when empty)
+plan = st.session_state.get("plan", {}) or {}
+df_plan = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
+
 
 # ---- View renderer (single-file, robust) ----
 st.markdown("---")
