@@ -44,6 +44,26 @@ except Exception:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
+def call_openrouter(messages, model=OPENROUTER_MODEL, max_tokens=1200, temperature=0):
+    """Minimal OpenRouter client for Streamlit Cloud."""
+    api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY missing in env or secrets")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": float(temperature or 0),
+    }
+    r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
+    r.raise_for_status()
+    return r.json()
+
 # --- JSON helpers used by generate_ai_menu_with_recipes ---
 def _extract_json(text: str) -> str:
     """Return the largest JSON object in the text. Ignores prose and code fences."""
