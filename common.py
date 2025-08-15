@@ -313,6 +313,68 @@ def generate_ai_menu_with_recipes(
             st.code(json.dumps(parsed, indent=2))
     return plan_dict
 
+# ===== Plan → DataFrame & Shopping list =====
+
+from typing import Dict, List, Tuple
+import pandas as _pd
+
+def plan_to_dataframe(plan: Dict[int, List[dict]], meals_per_day: int) -> _pd.DataFrame:
+    """
+    Convert the plan dict {day: [recipe_like,...]} to a flat DataFrame.
+    Works for both DB-picked recipes and AI-generated ones.
+    """
+    rows = []
+    slots = get_day_slots(meals_per_day)
+    for day, meals in (plan or {}).items():
+        for i, r in enumerate(meals or [], start=1):
+            label = slots[i-1] if i-1 < len(slots) else f"Meal {i}"
+            if not r:
+                rows.append({
+                    "day": day, "meal": label, "recipe": "(empty)",
+                    "calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0
+                })
+                continue
+            macros = r.get("macros", {}) or {}
+            rows.append({
+                "day": day,
+                "meal": label,
+                "recipe": r.get("name", ""),
+                "calories": int(r.get("calories", 0) or 0),
+                "protein_g": int(macros.get("protein_g", 0) or 0),
+                "carbs_g":   int(macros.get("carbs_g", 0) or 0),
+                "fat_g":     int(macros.get("fat_g", 0) or 0),
+            })
+    return _pd.DataFrame(rows)
+
+def consolidate_shopping_list(plan: Dict[int, List[dict]]) -> _pd.DataFrame:
+    """
+    Aggregate ingredients across the whole plan into a shopping list.
+    Robust to missing qty/unit/types.
+    """
+    from collections import defaultdict
+    totals: Dict[Tuple[str, str], float] = defaultdict(float)
+
+    for meals in (plan or {}).values():
+        for rec in meals or []:
+            if not rec:
+                continue
+            for ing in rec.get("ingredients", []) or []:
+                item = str(ing.get("item", "")).strip()
+                if not item:
+                    continue
+                unit = str(ing.get("unit", "")).strip()
+                # try to parse numeric qty; default to 1.0
+                qty = ing.get("qty", 1.0)
+                try:
+                    qty = float(qty)
+                except Exception:
+                    qty = 1.0
+                key = (item.lower(), unit)
+                totals[key] += qty
+
+    rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
+            for (item, unit), qty in sorted(totals.items())]
+    return _pd.DataFrame(rows)
 
 # -------------------
 # Pantry helpers
