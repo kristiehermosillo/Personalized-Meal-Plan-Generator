@@ -494,30 +494,84 @@ elif view == "Weekly Overview":
     annotate = st.session_state.get("show_pantry_note", False)
     need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-    # Quick summary pills across the top (no truncation)
-    st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
-    
-    def _short_kcal(n: int) -> str:
-        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
-    
-    badges = []
-    for i in range(1, days + 1):
-        sub = df_plan2[df_plan2["day"] == i]
-        kcal = int(sub["calories"].sum()) if not sub.empty else 0
-        badges.append(f"<div class='pill'><span>Day {i}</span><b>{_short_kcal(kcal)} kcal</b></div>")
-    
-    st.markdown(
-        """
-        <style>
-          .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
-          .pill{padding:10px 12px;border:1px solid rgba(255,255,255,0.12);
-                border-radius:12px;background:rgba(255,255,255,0.03)}
-          .pill span{opacity:.7;margin-right:8px}
-          .pill b{font-weight:600}
-        </style>
-        <div class="pillrow">""" + "".join(badges) + "</div>",
-        unsafe_allow_html=True
+# ---------- Compliance summary (per day) ----------
+def _short_kcal(n: int) -> str:
+    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+# Set a fixed tolerance (feels right for most people); you can expose as a setting later
+TOL_PCT = 10  # ±10% of calorie target
+
+target = int(st.session_state.get("calorie_target", 0)) if st.session_state.is_premium else None
+bad_tokens = normalize_tokens(st.session_state.get("pantry_text", ""))  # pantry isn’t a restriction
+# Real restrictions:
+allergy_tokens  = normalize_tokens(st.session_state.get("allergies", "")) if "allergies" in st.session_state else normalize_tokens("")
+skip_tokens     = normalize_tokens(st.session_state.get("exclusions", "")) if "exclusions" in st.session_state else normalize_tokens("")
+restrict_tokens = set(allergy_tokens + skip_tokens)
+
+# Pre-build handy maps
+by_day = {d: df_plan2[df_plan2["day"] == d] for d in range(1, days + 1)}
+
+# Build pill HTML
+pill_html = []
+for d in range(1, days + 1):
+    sub = by_day.get(d, pd.DataFrame())
+    kcal = int(sub["calories"].sum()) if not sub.empty else 0
+
+    # calorie compliance
+    cal_ok = True
+    if target:
+        tol = int(round(target * TOL_PCT / 100))
+        cal_ok = abs(kcal - target) <= tol
+
+    # ingredient compliance (per day)
+    conflicts = 0
+    if not sub.empty and restrict_tokens:
+        # gather ingredients text for each recipe in day d
+        for _, row in sub.iterrows():
+            # Find the recipe dict for this row
+            # plan structure: plan[day] -> list[recipe_like]
+            recipes_today = plan.get(d, [])
+            # find by recipe name
+            for rec in recipes_today:
+                if rec and rec.get("name","") == row["recipe"]:
+                    ings = " ".join(str(i.get("item","")).lower() for i in (rec.get("ingredients") or []))
+                    if any(tok and tok in ings for tok in restrict_tokens):
+                        conflicts += 1
+                    break
+
+    # Choose style
+    status = "ok" if (cal_ok and conflicts == 0) else ("warn" if conflicts == 0 else "bad")
+    label  = "✅" if status == "ok" else ("⚠️" if status == "warn" else "❌")
+    subline = []
+    if target:
+        subline.append(f"{_short_kcal(kcal)} kcal")
+        if not cal_ok:
+            delta = kcal - target
+            subline.append(f"({('+' if delta>0 else '')}{delta})")
+    if restrict_tokens:
+        subline.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
+
+    pill_html.append(
+        f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(subline) + "</b></div>"
     )
+
+st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
+st.markdown(
+    """
+    <style>
+      .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
+      .pill{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03)}
+      .pill.ok{border-color:rgba(46,204,113,.35);background:rgba(46,204,113,.08)}
+      .pill.warn{border-color:rgba(241,196,15,.35);background:rgba(241,196,15,.08)}
+      .pill.bad{border-color:rgba(231,76,60,.35);background:rgba(231,76,60,.08)}
+      .pill span{opacity:.75;margin-right:8px}
+      .pill b{font-weight:600}
+    </style>
+    <div class="pillrow">""" + "".join(pill_html) + "</div>",
+    unsafe_allow_html=True
+)
+# ---------- end Compliance summary ----------
+
 
 
     # Friendlier column names
@@ -530,6 +584,30 @@ elif view == "Weekly Overview":
         "carbs_g": "Carbs (g)",
         "fat_g": "Fat (g)",
     })
+
+# Build a "Notes" column that flags allergy/skip-ingredient hits per meal
+restrict_tokens = set(
+    normalize_tokens(allergies) + normalize_tokens(exclusions)
+)
+
+def _meal_note(day: int, recipe_name: str) -> str:
+    if not restrict_tokens:
+        return ""
+    recipes_today = plan.get(day, [])
+    for rec in recipes_today:
+        if rec and rec.get("name", "") == recipe_name:
+            ings = " ".join(
+                str(i.get("item", "")).lower() for i in (rec.get("ingredients") or [])
+            )
+            hits = [tok for tok in restrict_tokens if tok and tok in ings]
+            if hits:
+                return "Contains: " + ", ".join(sorted(set(hits)))
+    return ""
+
+plan_display["Notes"] = [
+    _meal_note(int(r["Day"]), str(r["Recipe"]))
+    for _, r in plan_display.iterrows()
+]
 
     # Tabs for a cleaner layout
     tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
@@ -547,6 +625,7 @@ elif view == "Weekly Overview":
                 "Protein (g)":st.column_config.NumberColumn(format="%d", width="small"),
                 "Carbs (g)":  st.column_config.NumberColumn(format="%d", width="small"),
                 "Fat (g)":    st.column_config.NumberColumn(format="%d", width="small"),
+                "Notes":      st.column_config.TextColumn(width="large"),
             },
         )
 
