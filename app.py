@@ -284,13 +284,6 @@ st.subheader(f"Your {days}-day plan")
 # Generate button (back in main content area)
 gen_clicked = st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True)
 
-# --- Background generation controls ---
-bg_col1, bg_col2 = st.columns([0.55, 0.45])
-with bg_col1:
-    start_bg = st.button("⏳ Generate in background (keep browsing)", use_container_width=True)
-with bg_col2:
-    check_bg = st.button("🔄 Check status", use_container_width=True)
-
 # If user clicked background, submit a job
 if start_bg:
     payload = dict(
@@ -362,6 +355,52 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
+
+# --- Background generation controls (must be after use_ai and sig exist) ---
+bg_col1, bg_col2 = st.columns([0.55, 0.45])
+with bg_col1:
+    start_bg = st.button("⏳ Generate in background (keep browsing)", use_container_width=True)
+with bg_col2:
+    check_bg = st.button("🔄 Check status", use_container_width=True)
+
+if start_bg:
+    payload = dict(
+        use_ai=bool(use_ai),
+        days=days,
+        meals_per_day=meals_per_day,
+        diets=list(diet_flags),
+        allergies=normalize_tokens(allergies),
+        exclusions=normalize_tokens(exclusions),
+        cuisines=list(cuisines),
+        cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
+        sig=sig,
+    )
+    st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
+    st.session_state["bg_payload"] = payload
+    st.info("Cooking your plan in the background… you can keep browsing tabs and adjusting filters.")
+
+bg_future = st.session_state.get("bg_future")
+if bg_future:
+    if bg_future.done():
+        try:
+            result_plan = bg_future.result()
+            if result_plan:
+                st.session_state.plan = result_plan
+                st.session_state.filters_sig = st.session_state.get("bg_payload", {}).get("sig")
+                st.success("✅ Your plan is ready!")
+            else:
+                st.warning("Background generation returned no plan.")
+        except Exception as e:
+            st.error(f"Background generation failed: {e}")
+        finally:
+            st.session_state["bg_future"] = None
+            st.session_state["bg_payload"] = None
+            st.rerun()
+    else:
+        st.caption("Still working… click **Check status** to refresh.")
+        if check_bg:
+            st.rerun()
+
 # If a plan file was uploaded (Dev Mode), read it and set the current plan
 if uploaded is not None:
     try:
@@ -489,90 +528,72 @@ elif view == "Weekly Overview":
     hh_size = int(st.session_state.get("household_size", 1))
     df_shop2 = consolidate_shopping_list(plan, household_size=hh_size)
 
-    # Sidebar pantry parsing
+    # Pantry matching
     pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
     annotate = st.session_state.get("show_pantry_note", False)
     need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
 
-# ---------- Compliance summary (per day) ----------
-def _short_kcal(n: int) -> str:
-    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+    # ---------- Compliance summary (per day) ----------
+    def _short_kcal(n: int) -> str:
+        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
-# Set a fixed tolerance (feels right for most people); you can expose as a setting later
-TOL_PCT = 10  # ±10% of calorie target
+    TOL_PCT = 10  # ±10%
+    target = int(st.session_state.get("calorie_target", 0)) if st.session_state.is_premium else None
+    restrict_tokens = set(normalize_tokens(allergies) + normalize_tokens(exclusions))
 
-target = int(st.session_state.get("calorie_target", 0)) if st.session_state.is_premium else None
-bad_tokens = normalize_tokens(st.session_state.get("pantry_text", ""))  # pantry isn’t a restriction
-# Real restrictions:
-allergy_tokens  = normalize_tokens(st.session_state.get("allergies", "")) if "allergies" in st.session_state else normalize_tokens("")
-skip_tokens     = normalize_tokens(st.session_state.get("exclusions", "")) if "exclusions" in st.session_state else normalize_tokens("")
-restrict_tokens = set(allergy_tokens + skip_tokens)
+    by_day = {d: df_plan2[df_plan2["day"] == d] for d in range(1, days + 1)}
+    pill_html = []
+    for d in range(1, days + 1):
+        sub = by_day.get(d, pd.DataFrame())
+        kcal = int(sub["calories"].sum()) if not sub.empty else 0
 
-# Pre-build handy maps
-by_day = {d: df_plan2[df_plan2["day"] == d] for d in range(1, days + 1)}
+        # calorie compliance
+        cal_ok = True
+        if target:
+            tol = int(round(target * TOL_PCT / 100))
+            cal_ok = abs(kcal - target) <= tol
 
-# Build pill HTML
-pill_html = []
-for d in range(1, days + 1):
-    sub = by_day.get(d, pd.DataFrame())
-    kcal = int(sub["calories"].sum()) if not sub.empty else 0
+        # ingredient conflicts
+        conflicts = 0
+        if not sub.empty and restrict_tokens:
+            for _, row in sub.iterrows():
+                for rec in plan.get(d, []):
+                    if rec and rec.get("name", "") == row["recipe"]:
+                        ings = " ".join(str(i.get("item", "")).lower() for i in (rec.get("ingredients") or []))
+                        if any(tok and tok in ings for tok in restrict_tokens):
+                            conflicts += 1
+                        break
 
-    # calorie compliance
-    cal_ok = True
-    if target:
-        tol = int(round(target * TOL_PCT / 100))
-        cal_ok = abs(kcal - target) <= tol
+        status = "ok" if (cal_ok and conflicts == 0) else ("warn" if conflicts == 0 else "bad")
+        label  = "✅" if status == "ok" else ("⚠️" if status == "warn" else "❌")
 
-    # ingredient compliance (per day)
-    conflicts = 0
-    if not sub.empty and restrict_tokens:
-        # gather ingredients text for each recipe in day d
-        for _, row in sub.iterrows():
-            # Find the recipe dict for this row
-            # plan structure: plan[day] -> list[recipe_like]
-            recipes_today = plan.get(d, [])
-            # find by recipe name
-            for rec in recipes_today:
-                if rec and rec.get("name","") == row["recipe"]:
-                    ings = " ".join(str(i.get("item","")).lower() for i in (rec.get("ingredients") or []))
-                    if any(tok and tok in ings for tok in restrict_tokens):
-                        conflicts += 1
-                    break
+        bits = []
+        if target:
+            bits.append(f"{_short_kcal(kcal)} kcal")
+            if not cal_ok:
+                delta = kcal - target
+                bits.append(f"({('+' if delta>0 else '')}{delta})")
+        if restrict_tokens:
+            bits.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
 
-    # Choose style
-    status = "ok" if (cal_ok and conflicts == 0) else ("warn" if conflicts == 0 else "bad")
-    label  = "✅" if status == "ok" else ("⚠️" if status == "warn" else "❌")
-    subline = []
-    if target:
-        subline.append(f"{_short_kcal(kcal)} kcal")
-        if not cal_ok:
-            delta = kcal - target
-            subline.append(f"({('+' if delta>0 else '')}{delta})")
-    if restrict_tokens:
-        subline.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
+        pill_html.append(f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(bits) + "</b></div>")
 
-    pill_html.append(
-        f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(subline) + "</b></div>"
+    st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
+    st.markdown(
+        """
+        <style>
+          .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
+          .pill{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03)}
+          .pill.ok{border-color:rgba(46,204,113,.35);background:rgba(46,204,113,.08)}
+          .pill.warn{border-color:rgba(241,196,15,.35);background:rgba(241,196,15,.08)}
+          .pill.bad{border-color:rgba(231,76,60,.35);background:rgba(231,76,60,.08)}
+          .pill span{opacity:.75;margin-right:8px}
+          .pill b{font-weight:600}
+        </style>
+        <div class="pillrow">""" + "".join(pill_html) + "</div>",
+        unsafe_allow_html=True
     )
-
-st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
-st.markdown(
-    """
-    <style>
-      .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
-      .pill{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03)}
-      .pill.ok{border-color:rgba(46,204,113,.35);background:rgba(46,204,113,.08)}
-      .pill.warn{border-color:rgba(241,196,15,.35);background:rgba(241,196,15,.08)}
-      .pill.bad{border-color:rgba(231,76,60,.35);background:rgba(231,76,60,.08)}
-      .pill span{opacity:.75;margin-right:8px}
-      .pill b{font-weight:600}
-    </style>
-    <div class="pillrow">""" + "".join(pill_html) + "</div>",
-    unsafe_allow_html=True
-)
-# ---------- end Compliance summary ----------
-
-
+    # ---------- end Compliance summary ----------
 
     # Friendlier column names
     plan_display = df_plan2.rename(columns={
@@ -585,28 +606,23 @@ st.markdown(
         "fat_g": "Fat (g)",
     })
 
-# Build a "Notes" column that flags allergy/skip-ingredient hits per meal
-    restrict_tokens = set(
-        normalize_tokens(allergies) + normalize_tokens(exclusions)
-    )
-    
+    # Build a "Notes" column that flags allergy/skip-ingredient hits per meal
+    restrict_tokens_notes = set(normalize_tokens(allergies) + normalize_tokens(exclusions))
+
     def _meal_note(day: int, recipe_name: str) -> str:
-        if not restrict_tokens:
+        if not restrict_tokens_notes:
             return ""
-        recipes_today = plan.get(day, [])
-        for rec in recipes_today:
+        for rec in plan.get(day, []):
             if rec and rec.get("name", "") == recipe_name:
-                ings = " ".join(
-                    str(i.get("item", "")).lower() for i in (rec.get("ingredients") or [])
-                )
-                hits = [tok for tok in restrict_tokens if tok and tok in ings]
+                ings = " ".join(str(i.get("item", "")).lower() for i in (rec.get("ingredients") or []))
+                hits = [tok for tok in restrict_tokens_notes if tok and tok in ings]
                 if hits:
                     return "Contains: " + ", ".join(sorted(set(hits)))
+                break
         return ""
-    
+
     plan_display["Notes"] = [
-        _meal_note(int(r["Day"]), str(r["Recipe"]))
-        for _, r in plan_display.iterrows()
+        _meal_note(int(r["Day"]), str(r["Recipe"])) for _, r in plan_display.iterrows()
     ]
 
     # Tabs for a cleaner layout
@@ -618,32 +634,28 @@ st.markdown(
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Day":        st.column_config.NumberColumn(format="%d", width="small"),
-                "Meal":       st.column_config.TextColumn(width="small"),
-                "Recipe":     st.column_config.TextColumn(width="large"),
-                "Calories":   st.column_config.NumberColumn(format="%d", width="small"),
-                "Protein (g)":st.column_config.NumberColumn(format="%d", width="small"),
-                "Carbs (g)":  st.column_config.NumberColumn(format="%d", width="small"),
-                "Fat (g)":    st.column_config.NumberColumn(format="%d", width="small"),
-                "Notes":      st.column_config.TextColumn(width="large"),
+                "Day":         st.column_config.NumberColumn(format="%d", width="small"),
+                "Meal":        st.column_config.TextColumn(width="small"),
+                "Recipe":      st.column_config.TextColumn(width="large"),
+                "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
+                "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
+                "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
+                "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
+                "Notes":       st.column_config.TextColumn(width="large"),
             },
         )
-
-        dl1, _ = st.columns([0.5, 0.5])
-        with dl1:
-            st.download_button(
-                "Download Plan (CSV)",
-                data=plan_display.to_csv(index=False).encode(),
-                file_name="mealplan.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+        st.download_button(
+            "Download Plan (CSV)",
+            data=plan_display.to_csv(index=False).encode(),
+            file_name="mealplan.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     with tab_shop:
         left, right = st.columns([0.65, 0.35])
 
         with right:
-            # Quick inline adjuster for scaling (updates list live)
             new_hh = st.number_input(
                 "People you’re cooking for",
                 min_value=1, max_value=12, step=1, value=hh_size,
@@ -662,26 +674,14 @@ st.markdown(
                 st.write("No pantry items entered.")
 
         with left:
-            # Optional inline annotation view
-            if annotate:
-                if not need_df.empty:
-                    need_df_display = need_df.copy()
-                    norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
-                    need_df_display["item"] = need_df_display["item"].astype(str).apply(
-                        lambda x: f"{x} (have)" if x.lower() in norm_have else x
-                    )
-                    shop_display = need_df_display
-                else:
-                    shop_display = need_df
-            else:
-                shop_display = need_df
+            shop_display = need_df.copy() if annotate else need_df
+            if annotate and not need_df.empty:
+                norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
+                shop_display["item"] = shop_display["item"].astype(str).apply(
+                    lambda x: f"{x} (have)" if x.lower() in norm_have else x
+                )
 
-            shop_display = shop_display.rename(columns={
-                "item": "Item",
-                "quantity": "Quantity",
-                "unit": "Unit",
-            })
-
+            shop_display = shop_display.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
             st.dataframe(
                 shop_display,
                 use_container_width=True,
@@ -709,10 +709,9 @@ st.markdown(
                         },
                     )
 
-        st.markdown("---")
         st.download_button(
             "Download Shopping List (CSV)",
-            data=df_shop2.rename(columns={"item":"Item","quantity":"Quantity","unit":"Unit"}).to_csv(index=False).encode(),
+            data=df_shop2.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"}).to_csv(index=False).encode(),
             file_name="shopping_list.csv",
             mime="text/csv",
             use_container_width=True,
@@ -730,33 +729,13 @@ st.markdown(
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Day":        st.column_config.NumberColumn(format="%d", width="small"),
-                "Calories":   st.column_config.NumberColumn(format="%d", width="small"),
-                "Protein (g)":st.column_config.NumberColumn(format="%d", width="small"),
-                "Carbs (g)":  st.column_config.NumberColumn(format="%d", width="small"),
-                "Fat (g)":    st.column_config.NumberColumn(format="%d", width="small"),
+                "Day":         st.column_config.NumberColumn(format="%d", width="small"),
+                "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
+                "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
+                "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
+                "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
             },
         )
-
-
-    # Downloads
-    st.markdown("---")
-    dl1, dl2 = st.columns(2)
-    with dl1:
-        st.download_button(
-            "Download Plan (CSV)",
-            data=df_plan2.to_csv(index=False).encode(),
-            file_name="mealplan.csv",
-            mime="text/csv",
-        )
-    with dl2:
-        st.download_button(
-            "Download Shopping List (CSV)",
-            data=df_shop2.to_csv(index=False).encode(),
-            file_name="shopping_list.csv",
-            mime="text/csv",
-        )
-
 
 
 elif view == "Recipes":
