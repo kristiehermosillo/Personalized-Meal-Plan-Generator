@@ -29,7 +29,14 @@ def call_openrouter(messages: list[dict], model: str = OPENROUTER_MODEL, max_tok
     if not api_key:
         raise RuntimeError("Missing OPENROUTER_API_KEY")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": model, "messages": messages, "temperature": 0.4, "max_tokens": max_tokens}
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": max_tokens,
+        # Many OpenRouter models support this; if they don't, it's ignored.
+        "response_format": {"type": "json_object"},
+    }
     r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
     r.raise_for_status()
     return r.json()
