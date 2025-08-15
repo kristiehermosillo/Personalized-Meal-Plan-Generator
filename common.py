@@ -355,49 +355,6 @@ def generate_ai_menu_with_recipes(
         st.error("AI didn’t return any usable meals. Try again or switch to 'Pick from built‑in'.")
     return plan_dict
 
-
-    plan_dict: dict[int, list[dict]] = {}
-    try:
-        for block in parsed.get("plan", []):
-            day = int(block.get("day", 0))
-            meals_out: list[dict] = []
-            for m in block.get("meals", []):
-                r = m.get("recipe", {}) or {}
-                meals_out.append({
-                    "name": r.get("name", "Recipe"),
-                    "course": (r.get("course") or m.get("slot") or "any").lower(),
-                    "cuisine": r.get("cuisine", ""),
-                    "calories": int(r.get("calories") or 0),
-                    "macros": {
-                        "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
-                        "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
-                        "fat_g":     int((r.get("macros") or {}).get("fat_g")     or 0),
-                    },
-                    "ingredients": [
-                        {
-                            "item": str(i.get("item","")).strip(),
-                            "qty":  i.get("qty", 1),
-                            "unit": str(i.get("unit","")).strip(),
-                        }
-                        for i in (r.get("ingredients") or [])
-                        if str(i.get("item","")).strip()
-                    ],
-                    "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
-                })
-            if day and meals_out:
-                plan_dict[day] = meals_out
-    except Exception as e:
-        st.error(f"Could not normalize AI output: {e}")
-        with st.expander("Show parsed JSON"):
-            st.code(json.dumps(parsed, indent=2))
-        return {}
-
-    if not plan_dict:
-        st.error("AI didn’t return any usable meals. Try again or switch to 'Pick from built‑in'.")
-        with st.expander("Show parsed JSON"):
-            st.code(json.dumps(parsed, indent=2))
-    return plan_dict
-
 # ===== Plan → DataFrame & Shopping list =====
 
 from typing import Dict, List, Tuple
