@@ -384,7 +384,7 @@ elif view == "Weekly Overview":
     with c2:
         st.markdown("**Shopping list**")
         
-    st.caption(f"Scaled for {st.session_state.get('household_size', 1)} person(s)")
+        st.caption(f"Scaled for {st.session_state.get('household_size', 1)} person(s)")
 
         # Pantry split (re-use your helpers)
         pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
