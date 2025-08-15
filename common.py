@@ -25,7 +25,6 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
 # --- JSON helpers used by generate_ai_menu_with_recipes ---
-
 def _extract_json(text: str) -> str:
     """Pull the JSON object out of a response (handles code fences)."""
     t = (text or "").strip()
@@ -40,18 +39,16 @@ def _extract_json(text: str) -> str:
     if "{" in t and "}" in t:
         start = t.find("{")
         end = t.rfind("}")
-        return t[start : end + 1]
+        return t[start:end+1]
     return t
-
 
 def _clean_json(s: str) -> str:
     """Light cleanup to reduce trivial JSON errors (dangling/duplicate commas)."""
     import re as _re
-    # remove trailing commas before ] or }
-    s = _re.sub(r",\s*(\]|\})", r"\1", s)
-    # collapse double commas
-    s = _re.sub(r",\s*,", ",", s)
+    s = _re.sub(r",\s*(\]|\})", r"\1", s)  # remove trailing commas
+    s = _re.sub(r",\s*,", ",", s)          # collapse double commas
     return s.strip()
+
 
 def call_openrouter(messages: list[dict], model: str = OPENROUTER_MODEL, max_tokens: int = 1200) -> dict:
     api_key = os.getenv("OPENROUTER_API_KEY") or st.secrets.get("OPENROUTER_API_KEY", None)
@@ -295,7 +292,11 @@ def generate_ai_menu_with_recipes(
             st.error(f"AI request failed for day {day_idx}: {e}")
             return {}
     
-        cleaned = _clean_json(_extract_json(raw))
+        try:
+            cleaned = _clean_json(_extract_json(raw))
+        except NameError:
+            # Fallback if the helper isn't in scope for any reason
+            cleaned = _extract_json(raw)
     
         import re as _re
         try:
