@@ -46,77 +46,108 @@ def call_openrouter(messages, model=OPENROUTER_MODEL, max_tokens=1200, temperatu
 
 # JSON helpers used by generate_ai_menu_with_recipes
 def _extract_json(text: str) -> str:
-    """Return the largest JSON object in the text. Ignores prose and code fences."""
+    """Extract the first full JSON object or array, aware of quotes and escapes."""
     t = (text or "").strip()
 
-    m = re.search(r"```json\s*(.+?)```", t, flags=re.S | re.I)
-    if not m:
-        m = re.search(r"```\s*(.+?)```", t, flags=re.S)
+    # strip code fences first
+    m = re.search(r"```(?:json)?\s*(.+?)```", t, flags=re.S | re.I)
     if m:
         t = m.group(1).strip()
 
-    starts = []
-    best = None
+    # find first { or [
+    start = None
     for i, ch in enumerate(t):
-        if ch == "{":
-            starts.append(i)
-        elif ch == "}":
-            if starts:
-                s = starts.pop()
-                if not starts:
-                    cand = (s, i + 1)
-                    if best is None or (cand[1] - cand[0]) > (best[1] - best[0]):
-                        best = cand
-    if best:
-        return t[best[0]:best[1]]
+        if ch in "{[":
+            start = i
+            break
+    if start is None:
+        return t
 
-    if "{" in t and "}" in t:
-        return t[t.find("{"): t.rfind("}") + 1]
-    return t
+    # walk and match until the top level closes
+    stack = []
+    in_str = False
+    esc = False
+    for i in range(start, len(t)):
+        ch = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        else:
+            if ch == '"':
+                in_str = True
+                continue
+            if ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]":
+                if not stack:
+                    return t[start:i+1]
+                want = stack.pop()
+                if ch != want:
+                    # mismatch, return what we have
+                    return t[start:i+1]
+                if not stack:
+                    return t[start:i+1]
+    return t[start:]
 
 def _clean_json(s: str) -> str:
     """Lenient cleanup for common model quirks."""
     if not s:
         return s
+    # normalize quotes
     s = s.replace("“", '"').replace("”", '"').replace("’", "'")
+    # convert Python literals
     s = s.replace("None", "null").replace("True", "true").replace("False", "false")
+    # fix trailing commas
     s = re.sub(r",\s*([\]}])", r"\1", s)
+    # collapse double commas
     s = re.sub(r",\s*,", ",", s)
+    # remove commas right after opening brace or bracket
     s = re.sub(r"([\[{])\s*,\s*", r"\1", s)
-        # heal missing end quotes like: "key": "value }
-    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*}', r'\1\2"}', s)
-    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*,', r'\1\2",', s)
+    # heal missing end quotes in string values before } or ,
+    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*}', r'\1\2"}', s)   # ... "value }
+    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*,', r'\1\2",', s)   # ... "value ,
     return s.strip()
 
+
 def _safe_json_load(cleaned: str, *, day_idx: int | None = None, raw: str = "") -> dict:
-    """Try multiple parses; raise ValueError with good context if it still fails."""
+    """Try multiple parses; raise ValueError with clear context if it still fails."""
     import json as _json
     import re as _re
 
-    # Try normal parse
+    err1 = None
+    # First attempt
     try:
         parsed = _json.loads(cleaned)
         return parsed if isinstance(parsed, dict) else {"plan": parsed}
-    except Exception:
-        pass
+    except Exception as e:
+        err1 = e
 
-    # Try a second pass: tighten commas again
+    # Second attempt: tighten commas again
     cleaned2 = _re.sub(r",\s*,", ",", cleaned)
     try:
         parsed = _json.loads(cleaned2)
         return parsed if isinstance(parsed, dict) else {"plan": parsed}
-    except Exception:
+    except Exception as e2:
         # Last chance: if the model returned an array, wrap it
         if cleaned2.lstrip().startswith("[") and cleaned2.rstrip().endswith("]"):
             try:
                 arr = _json.loads(cleaned2)
                 return {"plan": arr}
-            except Exception:
-                pass
+            except Exception as e3:
+                err_final = f"{err1} then {e2} then {e3}"
+        else:
+            err_final = f"{err1} then {e2}"
 
     ctx = f" (day {day_idx})" if day_idx else ""
     snippet = (raw or cleaned)[:6000]
-    raise ValueError(f"Invalid JSON{ctx}. Snippet:\n{snippet}")
+    raise ValueError(f"Invalid JSON{ctx}: {err_final}\nSnippet:\n{snippet}")
 
 
 # ---- helpers ----
