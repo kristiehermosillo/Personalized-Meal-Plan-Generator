@@ -206,10 +206,10 @@ st.session_state.household_size = int(st.sidebar.number_input(
     help="Used to scale the shopping list"
 ))
 
-diet_flags = st.sidebar.multiselect("Dietary style",
+diet_flags = st.sidebar.multiselect("Diet",
     ["vegetarian","vegan","gluten-free","dairy-free","pescatarian","low-carb"], default=[])
-allergies  = st.sidebar.text_input("Allergies (comma-separated)", "")
-exclusions = st.sidebar.text_input("Disliked ingredients (comma-separated)", "")
+allergies  = st.sidebar.text_input("Allergies to avoid", "")
+exclusions = st.sidebar.text_input("Skip ingredients", "")
 meals_per_day = st.sidebar.slider("Meals per day", 2, 4, 3)
 if st.session_state.is_premium:
     st.session_state.calorie_target = int(st.sidebar.number_input(
@@ -222,7 +222,7 @@ if st.session_state.is_premium:
     ))
 else:
     st.sidebar.info("Calorie targeting available in Premium.")
-cuisines = st.sidebar.multiselect("Cuisine preference (optional)",
+cuisines = st.sidebar.multiselect("Favorite cuisines (optional)",
     ["american","mediterranean","asian","mexican","indian","middle-eastern","italian"], default=[])
 
 days = PREMIUM_DAYS if st.session_state.is_premium else FREE_DAYS
@@ -256,7 +256,7 @@ import hashlib
 
 st.subheader(f"Your {days}-day plan")
 # Generate button (back in main content area)
-gen_clicked = st.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
+gen_clicked = st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True)
 
 # Friendlier wording for normal users (no “AI” language)
 if st.session_state.is_premium:
@@ -302,6 +302,19 @@ if uploaded is not None:
             st.error("Invalid plan file format (expected a JSON object).")
     except Exception as e:
         st.error(f"Could not load plan: {e}")
+        
+# --- Fill any missing days from our cookbook so users always get a full week
+if st.session_state.get("plan"):
+    missing_days = [d for d in range(1, days + 1) if not st.session_state.plan.get(d)]
+    if missing_days:
+        fallback = pick_meals(
+            filtered, meals_per_day, len(missing_days),
+            st.session_state.calorie_target if st.session_state.is_premium else None
+        )
+        # fallback keys are 1..N; map them onto the missing day numbers
+        for i, d in enumerate(missing_days, start=1):
+            st.session_state.plan[d] = fallback.get(i, [])
+        st.success(f"Added {len(missing_days)} day(s) from our cookbook to complete your week.")
 
 # Decide if we should (re)generate
 # Only generate when the user clicks the button.
@@ -352,20 +365,25 @@ if view == "Today":
     st.subheader("📅 Today’s Meals")
 
     if not plan or not list(plan.keys()):
-        st.info("No plan yet. Click **Generate / Regenerate plan** above.")
+        with st.container(border=True):
+            st.markdown("### Let’s make your week")
+            st.markdown(
+                "1. Pick your **diet, allergies, and cuisines** on the left.\n"
+                "2. Choose **Recipe source** (from our cookbook or create new recipes).\n"
+                "3. Click **Generate my meal plan**."
+            )
+            st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True, key="gen_btn_empty")
         st.stop()
 
     max_day = max(plan.keys())
 
     # Horizontal day picker (no slider)
-    day_label = st.radio(
-        "Pick a day",
-        [f"Day {i}" for i in range(1, max_day + 1)],
-        index=0,
-        horizontal=True,
-    )
-    day = int(day_label.split()[1])
-
+    import datetime as _dt
+    start = _dt.date.today()
+    labels = [f"Day {i} ({(start + _dt.timedelta(days=i-1)).strftime('%a')})" for i in range(1, max_day + 1)]
+    day_label = st.radio("Pick a day", labels, index=0, horizontal=True)
+    day = int(day_label.split()[1])  # still returns 1..7
+    
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
 
@@ -374,7 +392,9 @@ if view == "Today":
         if not r:
             st.write(f"**{label}** — (empty)")
             continue
-        with st.expander(f"{label} — {r['name']}", expanded=False):
+        kcal = int(r.get("calories") or 0)
+        serv = int(r.get("servings") or 1)
+        with st.expander(f"{label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}", expanded=False):
             st.write("**Ingredients:**")
             for ing in r["ingredients"]:
                 st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing['item']}".strip())
