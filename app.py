@@ -161,7 +161,6 @@ view = st.sidebar.radio(
 )
 
 st.sidebar.markdown("### Plan controls")
-gen_clicked = st.sidebar.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
 st.session_state.plan_locked = st.sidebar.checkbox(
     "🔒 Lock this plan (don’t auto-change)",
     value=st.session_state.get("plan_locked", False)
@@ -188,7 +187,14 @@ allergies  = st.sidebar.text_input("Allergies (comma-separated)", "")
 exclusions = st.sidebar.text_input("Disliked ingredients (comma-separated)", "")
 meals_per_day = st.sidebar.slider("Meals per day", 2, 4, 3)
 if st.session_state.is_premium:
-    st.session_state.calorie_target = st.sidebar.slider("Daily calorie target", 1200, 3200, st.session_state.calorie_target, step=100)
+    st.session_state.calorie_target = int(st.sidebar.number_input(
+        "Daily calorie target",
+        min_value=800,          # adjust if you want a wider range
+        max_value=5000,
+        value=int(st.session_state.get("calorie_target", 2000)),
+        step=10,
+        help="Type an exact number (kcal) — e.g., 1875."
+    ))
 else:
     st.sidebar.info("Calorie targeting available in Premium.")
 cuisines = st.sidebar.multiselect("Cuisine preference (optional)",
@@ -225,6 +231,8 @@ import json
 import hashlib
 
 st.subheader(f"Your {days}-day plan")
+# Generate button (back in main content area)
+gen_clicked = st.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
 
 # AI toggle still Premium-only
 use_ai = st.session_state.is_premium and st.toggle("Use AI to draft plan", value=True, key="use_ai_toggle")
