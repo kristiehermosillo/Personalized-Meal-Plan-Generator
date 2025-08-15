@@ -1,13 +1,16 @@
-# app.py  — Home / Dashboard
+# app.py — Home / Dashboard
 import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
+
 from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
     RECIPE_DB, Recipe,
     normalize_tokens, recipe_matches, get_day_slots,
     plan_to_dataframe, consolidate_shopping_list,
-    pick_meals, pick_meals_ai, generate_ai_menu_with_recipes
+    pick_meals, pick_meals_ai,                 # keep both
+    generate_ai_menu_with_recipes              # <-- include THIS here
 )
+
 
 from common import generate_ai_menu_with_recipes
 
