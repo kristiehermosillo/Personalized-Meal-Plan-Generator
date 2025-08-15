@@ -1,6 +1,7 @@
 # app.py — Home / Dashboard
 import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
+import json
 
 from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
@@ -150,6 +151,36 @@ with right:
 st.divider()
 
 # ---- Sidebar inputs ----
+# ---- Sidebar: TOP controls ----
+st.sidebar.markdown("### Navigation")
+view = st.sidebar.radio(
+    "Go to",
+    ["Today", "Weekly Overview", "Recipes"],
+    index=0,
+    horizontal=False,
+)
+
+st.sidebar.markdown("### Plan controls")
+gen_clicked = st.sidebar.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
+st.session_state.plan_locked = st.sidebar.checkbox(
+    "🔒 Lock this plan (don’t auto-change)",
+    value=st.session_state.get("plan_locked", False)
+)
+
+# Download + Load JSON live in sidebar too
+if "plan" in st.session_state:
+    dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
+    st.sidebar.download_button(
+        "⬇️ Download plan (JSON)",
+        data=dl_plan,
+        file_name="mealplan.json",
+        mime="application/json",
+        use_container_width=True
+    )
+st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
+
+uploaded = st.sidebar.file_uploader("⬆️ Load plan (JSON)", type=["json"])
+
 st.sidebar.header("Your Preferences")
 diet_flags = st.sidebar.multiselect("Dietary style",
     ["vegetarian","vegan","gluten-free","dairy-free","pescatarian","low-carb"], default=[])
@@ -164,16 +195,6 @@ cuisines = st.sidebar.multiselect("Cuisine preference (optional)",
     ["american","mediterranean","asian","mexican","indian","middle-eastern","italian"], default=[])
 
 days = PREMIUM_DAYS if st.session_state.is_premium else FREE_DAYS
-
-st.sidebar.markdown("### Navigation")
-view = st.sidebar.radio(
-    "Go to",
-    ["Today", "Weekly Overview", "Recipes"],
-    index=0,
-    horizontal=False,
-)
-
-st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
 
 st.sidebar.markdown("### Pantry (optional)")
 pantry_text = st.sidebar.text_area(
@@ -234,57 +255,6 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
-
-with st.expander("AI connection test (optional)"):
-    if st.button("Run a 1-shot OpenRouter test"):
-        try:
-            from common import call_openrouter, OPENROUTER_MODEL
-            resp = call_openrouter(
-                [{"role": "user", "content": "Reply with the word OK"}],
-                model=OPENROUTER_MODEL,
-                max_tokens=5,
-            )
-            st.success("OpenRouter call succeeded.")
-            st.write(resp.get("choices", [{}])[0].get("message", {}))
-        except Exception as e:
-            st.error(f"OpenRouter call failed: {e}")
-
-# Controls
-cols = st.columns([0.35, 0.35, 0.30])
-with cols[0]:
-    gen_clicked = st.button("🔁 Generate / Regenerate plan", type="primary", use_container_width=True)
-with cols[1]:
-    st.session_state.plan_locked = st.checkbox(
-        "🔒 Lock this plan (don’t auto-change)",
-        value=st.session_state.get("plan_locked", False)
-    )
-with cols[2]:
-    # Save/Load plan JSON
-    dl_plan = None
-    if "plan" in st.session_state:
-        dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
-        st.download_button(
-            "⬇️ Download plan (JSON)",
-            data=dl_plan,
-            file_name="mealplan.json",
-            mime="application/json",
-            use_container_width=True
-        )
-
-# Load JSON
-uploaded = st.file_uploader("⬆️ Load plan (JSON)", type=["json"], label_visibility="collapsed")
-if uploaded is not None:
-    try:
-        loaded_plan = json.loads(uploaded.read().decode("utf-8"))
-        # basic validation: expect dict of day->list
-        if isinstance(loaded_plan, dict):
-            st.session_state.plan = loaded_plan
-            st.session_state.filters_sig = sig  # assume this plan corresponds to current filters
-            st.success("Plan loaded from file.")
-        else:
-            st.error("Invalid plan file format.")
-    except Exception as e:
-        st.error(f"Could not load plan: {e}")
 
 # Decide if we should (re)generate
 should_generate = False
