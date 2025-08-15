@@ -3,7 +3,7 @@ import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
 import json
 
-DEV_MODE = bool(st.secrets.get("DEV_MODE", False))
+DEV_MODE = str(st.secrets.get("DEV_MODE", "") or os.getenv("DEV_MODE", "")).lower() in ("1", "true", "yes", "on")
 
 from common import (
     APP_NAME, FREE_DAYS, PREMIUM_DAYS, DEFAULT_BACKEND_URL,
