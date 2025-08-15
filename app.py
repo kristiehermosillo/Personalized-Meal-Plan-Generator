@@ -10,15 +10,11 @@ from common import (
     pick_meals, pick_meals_ai,                 # keep both
     generate_ai_menu_with_recipes              # <-- include THIS here
 )
-# --- Planner fallback (ensures symbol exists even if AI import fails) ---
-try:
-    pick_meals      # imported above
-    pick_meals_ai   # imported above
-except NameError:
+
+# Planner fallback to ensure the symbol exists even if AI import fails
+if "pick_meals_ai" not in globals():
     def pick_meals_ai(*args, **kwargs):
-        # If the AI planner isn’t available, use the normal one
         return pick_meals(*args, **kwargs)
-# --- end planner fallback ---
 
 # --- Pantry helpers: safe import with fallbacks ---
 try:
