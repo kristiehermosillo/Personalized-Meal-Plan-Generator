@@ -403,6 +403,7 @@ def generate_ai_menu_with_recipes(
                 "course": (r.get("course") or m.get("slot") or "any").lower(),
                 "cuisine": r.get("cuisine", ""),
                 "calories": int(r.get("calories") or 0),
+                "servings": int(r.get("servings") or 1),
                 "macros": {
                     "protein_g": int((r.get("macros") or {}).get("protein_g") or 0),
                     "carbs_g":   int((r.get("macros") or {}).get("carbs_g")   or 0),
@@ -571,7 +572,6 @@ def consolidate_shopping_list(plan: Dict[int, List[dict]], household_size: int =
     rows = [{"item": item.title(), "quantity": round(qty, 2), "unit": unit}
             for (item, unit), qty in sorted(totals.items())]
     return _pd.DataFrame(rows)
-
 
 # -------------------
 # Pantry helpers
