@@ -265,17 +265,13 @@ def make_filters_signature() -> str:
 sig = make_filters_signature()
 
 # Decide if we should (re)generate
-should_generate = False
-existing_plan = st.session_state.get("plan")
+# Only generate when the user clicks the button.
+should_generate = bool(gen_clicked)
 
-if not existing_plan:
-    should_generate = True
-elif gen_clicked:
-    should_generate = True
-elif not st.session_state.get("plan_locked", False) and st.session_state.get("filters_sig") != sig:
-    should_generate = True
-elif st.session_state.get("plan_locked", False) and st.session_state.get("filters_sig") != sig:
-    st.info("Your filters changed, but the plan is locked. Click Generate or Regenerate to update.")
+# Optional: if inputs changed since last generation, show a gentle nudge (no auto-generate).
+existing_plan = st.session_state.get("plan")
+if existing_plan and st.session_state.get("filters_sig") != sig:
+    st.info("Your preferences changed. Click **Generate / Regenerate plan** to update.")
 
 if should_generate:
     if use_ai and ai_mode == "Generate new recipes":
