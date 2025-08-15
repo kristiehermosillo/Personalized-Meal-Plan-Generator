@@ -157,7 +157,6 @@ with right:
 
 st.divider()
 
-# ---- Sidebar inputs ----
 # ---- Sidebar: TOP controls ----
 st.sidebar.markdown("### Navigation")
 view = st.sidebar.radio(
@@ -168,7 +167,6 @@ view = st.sidebar.radio(
 )
 
 st.sidebar.markdown("### Plan controls")
-# Plan controls
 st.session_state.plan_locked = st.sidebar.checkbox(
     "🔒 Freeze this plan",
     value=st.session_state.get("plan_locked", False),
@@ -180,7 +178,7 @@ st.sidebar.caption("Free: 3-day plan preview. Upgrade for 7 days + macros + PDF 
 # --- Dev tools (hidden for users) ---
 uploaded = None
 if DEV_MODE:
-    if "plan" in st.session_state:
+    if st.session_state.get("plan"):
         dl_plan = json.dumps(st.session_state.plan, ensure_ascii=False, indent=0).encode()
         st.sidebar.download_button(
             "⬇️ Export plan (JSON)",
@@ -189,15 +187,12 @@ if DEV_MODE:
             mime="application/json",
             use_container_width=True
         )
-
     uploaded = st.sidebar.file_uploader(
         "⬆️ Import saved plan (JSON)",
         type=["json"],
         help="Use a file exported with the button above."
     )
-
-st.sidebar.caption("Free: 3‑day plan preview. Upgrade for 7 days + macros + PDF export.")
-
+# ----- end dev tools -----
 uploaded = st.sidebar.file_uploader("⬆️ Load plan (JSON)", type=["json"])
 
 st.sidebar.header("Your Preferences")
@@ -257,7 +252,6 @@ if not filtered:
     st.stop()
 
 # ---- Plan generation (manual + lock + save/load) ----
-import json
 import hashlib
 
 st.subheader(f"Your {days}-day plan")
@@ -319,7 +313,7 @@ if existing_plan and st.session_state.get("filters_sig") != sig:
     st.info("Your preferences changed. Click **Generate / Regenerate plan** to update.")
 
 if should_generate:
-    if use_ai and ai_mode == "Generate new recipes":
+    if use_ai:
         ai_plan = generate_ai_menu_with_recipes(
             days=days,
             meals_per_day=meals_per_day,
@@ -332,16 +326,15 @@ if should_generate:
         if ai_plan:
             st.session_state.plan = ai_plan
         else:
-            # <- DO NOT silently continue; make it obvious
             st.session_state.plan = {}
-            st.stop()  # shows the error from common.py and stops rendering
+            st.stop()
     else:
-        generator = pick_meals_ai if use_ai else pick_meals
-        st.session_state.plan = generator(
+        st.session_state.plan = pick_meals(
             filtered, meals_per_day, days,
             st.session_state.calorie_target if st.session_state.is_premium else None
         )
     st.session_state.filters_sig = sig
+
 
 # Use the plan from session (safe when empty)
 plan = st.session_state.get("plan", {}) or {}
