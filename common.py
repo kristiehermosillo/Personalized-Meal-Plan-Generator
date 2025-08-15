@@ -97,31 +97,31 @@ def _extract_json(text: str) -> str:
     return t[start:]
 
 def _clean_json(s: str) -> str:
-    """Lenient cleanup for common model quirks."""
+    """Lenient cleanup: normalize quotes/literals, remove stray tokens, fix commas."""
+    import re as _re
     if not s:
         return s
-    # normalize quotes
+
+    # normalize smart quotes → standard JSON quotes
     s = s.replace("“", '"').replace("”", '"').replace("’", "'")
-    # convert Python literals
-    s = s.replace("None", "null").replace("True", "true").replace("False", "false")
-    # fix trailing commas
-    s = re.sub(r",\s*([\]}])", r"\1", s)
+
+    # convert Python-ish literals to JSON
+    s = _re.sub(r"\bNone\b", "null", s)
+    s = _re.sub(r"\bTrue\b", "true", s)
+    s = _re.sub(r"\bFalse\b", "false", s)
+
+    # sometimes models leak a list-letter like ", b. {" between items — strip it
+    s = _re.sub(r",\s*[A-Za-z]\.\s*(\{)", r", \1", s)
+
+    # remove trailing commas before ] or }
+    s = _re.sub(r",\s*(\]|\})", r"\1", s)
     # collapse double commas
-    s = re.sub(r",\s*,", ",", s)
-    # remove commas right after opening brace or bracket
-    s = re.sub(r"([\[{])\s*,\s*", r"\1", s)
-
-    # heal missing end quotes in string values before } or ,
-    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*}', r'\1\2"}', s)   # ... "value }
-    s = re.sub(r'(":\s*")([^"\n{}]*?)\s*,', r'\1\2",', s)   # ... "value ,
-
-    # ensure certain keys are always quoted strings if the model forgot quotes
-    s = re.sub(r'("unit"\s*:\s*)([A-Za-zµ°/.\-\/]+)(\s*[,}])', r'\1"\2"\3', s)
-    s = re.sub(r'("course"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
-    s = re.sub(r'("slot"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
-    s = re.sub(r'("cuisine"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
+    s = _re.sub(r",\s*,", ",", s)
+    # remove comma right after [ or {
+    s = _re.sub(r"(\[|\{)\s*,\s*", r"\1", s)
 
     return s.strip()
+
 
 
 
@@ -384,6 +384,8 @@ def generate_ai_menu_with_recipes(
     "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
     "Return JSON only. No markdown. No prose. Use double quotes everywhere. "
     "All units must be strings like \"g\", \"tbsp\", \"tsp\", \"cup\"."
+    "Output ONLY strict JSON. No code fences, no commentary, and no bullets or lettered list markers like 'a.' or 'b.'."
+
 )
 
     plan_dict: dict[int, list[dict]] = {}
@@ -433,16 +435,16 @@ def generate_ai_menu_with_recipes(
             messages = [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content":
-                    "Schema:\n"
+                    "Schema (strict):\n"
                     + json.dumps(schema)
-                    + "\n\nConstraints for this day only:\n"
+                    + "\n\nConstraints for THIS response only:\n"
                     + json.dumps(day_constraints)
                     + "\n\nVariety rules:\n"
-                    + "- Do not repeat any recipe name in 'ban_recipes'.\n"
-                    + "- Prefer not to use proteins in 'avoid_primary_proteins'.\n"
-                    + "- Vary breakfast styles across the week.\n"
+                    + "- Never repeat an exact recipe name in any other day. Do not use any name in 'ban_recipes'.\n"
+                    + "- Try to rotate the main protein; prefer NOT to use any in 'avoid_primary_proteins'.\n"
+                    + "- Vary breakfasts over the week.\n"
                     + extra_hint
-                    + "\n\nReturn ONE day as JSON with a single item in 'plan' for this 'day'."
+                    + "\n\nReturn ONLY one day's JSON (a single item in 'plan' for 'day')."
                 },
             ]
             try:
@@ -451,49 +453,48 @@ def generate_ai_menu_with_recipes(
             except Exception as e:
                 st.error(f"AI request failed for day {day_idx}: {e}")
                 return None, None
-
+        
             cleaned = _clean_json(_extract_json(raw))
             try:
                 parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
-                return raw, parsed
             except ValueError as e:
                 st.error(str(e))
-                with st.expander(f"Show AI raw output for day {day_idx}"):
+                with st.expander(f"Show AI raw output (day {day_idx})"):
                     st.code(raw[:6000])
-                with st.expander(f"Show cleaned JSON we tried to parse for day {day_idx}"):
+                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
                     st.code(cleaned[:6000], language="json")
-                return raw, None
-
+                return None, None
+        
+            return raw, parsed
+        
         raw, parsed = _ask_once()
         if parsed is None:
+            # try once more with a stronger hint
             raw, parsed = _ask_once(
-                extra_hint="\n- You returned invalid or duplicate content. Replace with different recipes and ensure all required fields."
+                extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly."
             )
-            if parsed is None:
-                st.warning(f"Skipping day {day_idx} due to invalid JSON.")
-                continue
-
-        meals_out = _normalize_day(parsed)
-        meals_out = [m for m in meals_out if m.get("name") and m["name"] not in seen_recipe_names]
-
-        if not meals_out:
-            st.warning(f"No usable meals for day {day_idx}.")
+        
+        if parsed is None:
+            # final fallback: build this day from our built-in DB so the week stays complete
+            fallback_meals: list[dict] = []
+            for slot in slots:
+                alt = _find_alternative_recipe(
+                    target_slot=slot,
+                    diets=diets or [],
+                    allergies=allergies or [],
+                    exclusions=exclusions or [],
+                    cuisines=cuisines or [],
+                    seen_names=seen_recipe_names,
+                )
+                if alt:
+                    fallback_meals.append(alt)
+                    seen_recipe_names.add(alt["name"])
+            if fallback_meals:
+                plan_dict[day_idx] = fallback_meals
+                continue  # go to next day
+            # if nothing at all, skip this day silently and continue
             continue
 
-        plan_dict[day_idx] = meals_out
-        for m in meals_out:
-            seen_recipe_names.add(m["name"])
-            prot = _primary_protein(m.get("ingredients"))
-            if prot:
-                seen_primary_proteins.append(prot)
-
-    if not plan_dict:
-        st.error("AI did not return any usable meals. Try again or switch to Pick from built in.")
-    else:
-        missing = [d for d in range(1, days + 1) if d not in plan_dict]
-        if missing:
-            st.warning(f"Invalid JSON on some days: {missing}. The rest of the week is ready.")
-    return plan_dict
 
 
 # ===== Plan → DataFrame & Shopping list =====
