@@ -193,7 +193,7 @@ if DEV_MODE:
         help="Use a file exported with the button above."
     )
 # ----- end dev tools -----
-uploaded = st.sidebar.file_uploader("⬆️ Load plan (JSON)", type=["json"])
+
 
 st.sidebar.header("Your Preferences")
 # People you are cooking for
