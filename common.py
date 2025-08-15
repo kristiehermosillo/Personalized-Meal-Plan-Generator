@@ -110,10 +110,19 @@ def _clean_json(s: str) -> str:
     s = re.sub(r",\s*,", ",", s)
     # remove commas right after opening brace or bracket
     s = re.sub(r"([\[{])\s*,\s*", r"\1", s)
+
     # heal missing end quotes in string values before } or ,
     s = re.sub(r'(":\s*")([^"\n{}]*?)\s*}', r'\1\2"}', s)   # ... "value }
     s = re.sub(r'(":\s*")([^"\n{}]*?)\s*,', r'\1\2",', s)   # ... "value ,
+
+    # ensure certain keys are always quoted strings if the model forgot quotes
+    s = re.sub(r'("unit"\s*:\s*)([A-Za-zµ°/.\-\/]+)(\s*[,}])', r'\1"\2"\3', s)
+    s = re.sub(r'("course"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
+    s = re.sub(r'("slot"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
+    s = re.sub(r'("cuisine"\s*:\s*)([A-Za-z\-]+)(\s*[,}])', r'\1"\2"\3', s)
+
     return s.strip()
+
 
 
 def _safe_json_load(cleaned: str, *, day_idx: int | None = None, raw: str = "") -> dict:
