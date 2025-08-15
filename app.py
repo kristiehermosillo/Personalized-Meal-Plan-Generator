@@ -586,28 +586,28 @@ st.markdown(
     })
 
 # Build a "Notes" column that flags allergy/skip-ingredient hits per meal
-restrict_tokens = set(
-    normalize_tokens(allergies) + normalize_tokens(exclusions)
-)
-
-def _meal_note(day: int, recipe_name: str) -> str:
-    if not restrict_tokens:
+    restrict_tokens = set(
+        normalize_tokens(allergies) + normalize_tokens(exclusions)
+    )
+    
+    def _meal_note(day: int, recipe_name: str) -> str:
+        if not restrict_tokens:
+            return ""
+        recipes_today = plan.get(day, [])
+        for rec in recipes_today:
+            if rec and rec.get("name", "") == recipe_name:
+                ings = " ".join(
+                    str(i.get("item", "")).lower() for i in (rec.get("ingredients") or [])
+                )
+                hits = [tok for tok in restrict_tokens if tok and tok in ings]
+                if hits:
+                    return "Contains: " + ", ".join(sorted(set(hits)))
         return ""
-    recipes_today = plan.get(day, [])
-    for rec in recipes_today:
-        if rec and rec.get("name", "") == recipe_name:
-            ings = " ".join(
-                str(i.get("item", "")).lower() for i in (rec.get("ingredients") or [])
-            )
-            hits = [tok for tok in restrict_tokens if tok and tok in ings]
-            if hits:
-                return "Contains: " + ", ".join(sorted(set(hits)))
-    return ""
-
-plan_display["Notes"] = [
-    _meal_note(int(r["Day"]), str(r["Recipe"]))
-    for _, r in plan_display.iterrows()
-]
+    
+    plan_display["Notes"] = [
+        _meal_note(int(r["Day"]), str(r["Recipe"]))
+        for _, r in plan_display.iterrows()
+    ]
 
     # Tabs for a cleaner layout
     tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
