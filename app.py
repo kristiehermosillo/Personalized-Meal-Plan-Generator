@@ -338,6 +338,37 @@ def make_filters_signature() -> str:
 
 sig = make_filters_signature()
 
+# ---- Always-visible Generate / Regenerate (runs in background) ----
+# Show this bar when a plan already exists OR a job is running.
+show_generate_bar = bool(st.session_state.get("plan")) or bool(st.session_state.get("bg_future"))
+
+if show_generate_bar:
+    disabled = bool(st.session_state.get("bg_future") and not st.session_state["bg_future"].done())
+    label = "🔁 Generate a new plan" if st.session_state.get("plan") else "🍽️ Generate my meal plan"
+
+    if st.button(label, type="primary", use_container_width=True, key="btn_generate_top", disabled=disabled):
+        payload = dict(
+            use_ai=bool(use_ai),
+            days=days,
+            meals_per_day=meals_per_day,
+            diets=list(diet_flags),
+            allergies=normalize_tokens(allergies),
+            exclusions=normalize_tokens(exclusions),
+            cuisines=list(cuisines),
+            cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
+            sig=sig,
+        )
+        job_id = uuid.uuid4().hex
+        st.session_state["bg_job_id"] = job_id
+        _set_progress(job_id, 0, days, "starting")
+
+        # NOTE: pass job_id to the worker
+        st.session_state["bg_future"] = _get_executor().submit(
+            _bg_run_generation, payload, filtered, job_id
+        )
+        st.session_state["bg_payload"] = payload
+        st.rerun()
+
 # ---- Background watcher (runs every rerun) ----
 bg_future = st.session_state.get("bg_future")
 job_id = st.session_state.get("bg_job_id")
