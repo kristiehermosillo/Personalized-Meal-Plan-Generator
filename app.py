@@ -456,17 +456,20 @@ if view == "Today":
                     cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
                     sig=sig,
                 )
-                job_id = str(uuid.uuid4())
-                _set_progress(job_id, 0, days, "queued")
-                st.session_state["bg_job_id"] = job_id
+                import uuid
+                job_id = uuid.uuid4().hex                      # NEW
+                st.session_state["bg_job_id"] = job_id         # NEW
+                _set_progress(job_id, 0, days, "starting")     # NEW seed
             
+                # NOTE the extra 3rd arg: job_id
                 st.session_state["bg_future"] = _get_executor().submit(
                     _bg_run_generation, payload, filtered, job_id
                 )
                 st.session_state["bg_payload"] = payload
-                st.toast("Cooking your plan in the background…", icon="🍳")
+                st.info("Cooking your plan in the background… you can keep browsing.")
                 st.rerun()
-                
+            
+                            
         st.stop()
         
     max_day = max(plan.keys())
