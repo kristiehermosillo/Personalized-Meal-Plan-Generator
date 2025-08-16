@@ -43,12 +43,12 @@ if "pick_meals_ai" not in globals():
         return pick_meals(*args, **kwargs)
         
 def _bg_run_generation(payload: dict, filtered_recipes: list[dict], job_id: str):
-    """Runs outside the Streamlit run loop (NO st.* calls here)."""
     def cb(step: int, total: int, note: str = ""):
         _set_progress(job_id, step, total, note)
 
     if payload["use_ai"]:
-        return generate_ai_menu_with_recipes(
+        cb(0, payload["days"], "starting")  # <-- add this
+        plan = generate_ai_menu_with_recipes(
             days=payload["days"],
             meals_per_day=payload["meals_per_day"],
             diets=payload["diets"],
@@ -56,10 +56,11 @@ def _bg_run_generation(payload: dict, filtered_recipes: list[dict], job_id: str)
             exclusions=payload["exclusions"],
             cuisines=payload["cuisines"],
             calorie_target=payload["cal_target"],
-            progress_cb=cb,   # <— NEW
+            progress_cb=cb,
         )
+        cb(payload["days"], payload["days"], "complete")  # <-- and this
+        return plan
     else:
-        # Simulate progress for non-AI generation (instant, but shows 100%)
         cb(0, payload["days"], "starting")
         plan = pick_meals(
             filtered_recipes,
