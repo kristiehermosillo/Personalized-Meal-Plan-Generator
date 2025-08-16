@@ -300,6 +300,7 @@ def generate_ai_menu_with_recipes(
     cuisines: list[str] | None = None,
     calorie_target: int | None = None,
     model: str = OPENROUTER_MODEL,
+    ui: bool = True,   # <— NEW
 ) -> dict[int, list[dict]]:
     """Create recipes plus a weekly plan and return {day: [recipe_like,...]}."""
 
@@ -431,7 +432,7 @@ def generate_ai_menu_with_recipes(
         day_constraints["ban_recipes"] = sorted(seen_recipe_names)
         day_constraints["avoid_primary_proteins"] = list(dict.fromkeys(seen_primary_proteins[-2:]))
 
-        def _ask_once(extra_hint: str = "") -> tuple[str | None, dict | None]:
+        def _ask_once(extra_hint: str = "", ui: bool = True) -> tuple[str | None, dict | None]:
             messages = [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content":
@@ -451,27 +452,30 @@ def generate_ai_menu_with_recipes(
                 resp = call_openrouter(messages, model=model, max_tokens=1800)
                 raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
             except Exception as e:
-                st.error(f"AI request failed for day {day_idx}: {e}")
+                if ui:
+                    st.error(f"AI request failed for day {day_idx}: {e}")
                 return None, None
-        
+
             cleaned = _clean_json(_extract_json(raw))
             try:
                 parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
+                return raw, parsed
             except ValueError as e:
-                st.error(str(e))
-                with st.expander(f"Show AI raw output (day {day_idx})"):
-                    st.code(raw[:6000])
-                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
-                    st.code(cleaned[:6000], language="json")
+                if ui:
+                    st.error(str(e))
+                    with st.expander(f"Show AI raw output (day {day_idx})"):
+                        st.code(raw[:6000])
+                    with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
+                        st.code(cleaned[:6000], language="json")
                 return None, None
         
             return raw, parsed
         
-        raw, parsed = _ask_once()
+        raw, parsed = _ask_once(ui=ui)
         if parsed is None:
-            # try once more with a stronger hint
             raw, parsed = _ask_once(
-                extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly."
+                extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly.",
+                ui=ui,
             )
         
         if parsed is None:
