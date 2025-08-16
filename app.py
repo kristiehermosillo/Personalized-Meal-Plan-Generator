@@ -3,6 +3,23 @@ import os, time, requests, pandas as pd, streamlit as st
 from dotenv import load_dotenv
 import json
 from concurrent.futures import ThreadPoolExecutor
+import threading, uuid, time
+
+# Thread-safe in-process progress store
+_PROGRESS = {}
+_PROGRESS_LOCK = threading.Lock()
+
+def _set_progress(job_id: str, step: int, total: int, note: str = ""):
+    with _PROGRESS_LOCK:
+        _PROGRESS[job_id] = {"step": step, "total": total, "note": note, "ts": time.time()}
+
+def _get_progress(job_id: str):
+    with _PROGRESS_LOCK:
+        return _PROGRESS.get(job_id)
+
+def _clear_progress(job_id: str):
+    with _PROGRESS_LOCK:
+        _PROGRESS.pop(job_id, None)
 
 @st.cache_resource
 def _get_executor():
@@ -25,7 +42,11 @@ if "pick_meals_ai" not in globals():
     def pick_meals_ai(*args, **kwargs):
         return pick_meals(*args, **kwargs)
         
-def _bg_run_generation(payload: dict, filtered_recipes: list[dict]):
+def _bg_run_generation(payload: dict, filtered_recipes: list[dict], job_id: str):
+    """Runs outside the Streamlit run loop (NO st.* calls here)."""
+    def cb(step: int, total: int, note: str = ""):
+        _set_progress(job_id, step, total, note)
+
     if payload["use_ai"]:
         return generate_ai_menu_with_recipes(
             days=payload["days"],
@@ -35,15 +56,19 @@ def _bg_run_generation(payload: dict, filtered_recipes: list[dict]):
             exclusions=payload["exclusions"],
             cuisines=payload["cuisines"],
             calorie_target=payload["cal_target"],
-            ui=False,  # <— CRITICAL: no Streamlit calls in background thread
+            progress_cb=cb,   # <— NEW
         )
     else:
-        return pick_meals(
+        # Simulate progress for non-AI generation (instant, but shows 100%)
+        cb(0, payload["days"], "starting")
+        plan = pick_meals(
             filtered_recipes,
             payload["meals_per_day"],
             payload["days"],
             payload["cal_target"],
         )
+        cb(payload["days"], payload["days"], "complete")
+        return plan
 
 # --- Pantry helpers: safe import with fallbacks ---
 try:
@@ -315,14 +340,28 @@ sig = make_filters_signature()
 
 # ---- Background watcher (runs every rerun) ----
 bg_future = st.session_state.get("bg_future")
-if bg_future:
+job_id = st.session_state.get("bg_job_id")
+
+if bg_future and job_id:
+    p = _get_progress(job_id) or {"step": 0, "total": days, "note": "starting", "ts": time.time()}
+    pct = 0.0 if not p["total"] else min(1.0, p["step"] / max(1, p["total"]))
+    st.progress(pct, text=f"Day {p['step']} of {p['total']} — {p.get('note','')}")
+
+    idle = time.time() - p["ts"]
+    if idle > 120:
+        st.warning("No update for 2+ minutes. It may be slow or stalled.")
+    else:
+        st.caption(f"Last update {int(idle)}s ago · you can keep browsing.")
+
+    if st.button("🔄 Refresh status", key="bg_refresh", use_container_width=True):
+        st.rerun()
+
     if bg_future.done():
         try:
             result_plan = bg_future.result()
             if result_plan:
-                # Optional: if you added dedupe_plan() earlier, keep this; otherwise it's safe to leave out.
                 try:
-                    result_plan = dedupe_plan(result_plan, filtered)
+                    result_plan = dedupe_plan(result_plan, filtered)  # safe if dedupe_plan doesn't exist
                 except Exception:
                     pass
                 st.session_state.plan = result_plan
@@ -333,11 +372,11 @@ if bg_future:
         except Exception as e:
             st.error(f"Background generation failed: {e}")
         finally:
+            _clear_progress(job_id)
             st.session_state["bg_future"] = None
             st.session_state["bg_payload"] = None
+            st.session_state["bg_job_id"] = None
             st.rerun()
-    else:
-        st.caption("Cooking… you can keep browsing. This will refresh when ready.")
 
 # If a plan file was uploaded (Dev Mode), read it and set the current plan
 if uploaded is not None:
@@ -417,11 +456,18 @@ if view == "Today":
                     cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
                     sig=sig,
                 )
-                st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
+                job_id = str(uuid.uuid4())
+                _set_progress(job_id, 0, days, "queued")
+                st.session_state["bg_job_id"] = job_id
+            
+                st.session_state["bg_future"] = _get_executor().submit(
+                    _bg_run_generation, payload, filtered, job_id
+                )
                 st.session_state["bg_payload"] = payload
-                st.info("Cooking your plan in the background… you can keep browsing.")
+                st.toast("Cooking your plan in the background…", icon="🍳")
                 st.rerun()
-    
+            
+                
         st.stop()
         
     max_day = max(plan.keys())
