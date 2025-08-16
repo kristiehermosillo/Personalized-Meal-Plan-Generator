@@ -314,24 +314,13 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
-
-# --- Background generation controls (after use_ai and sig exist) ---
-start_bg = False        # safety so the names always exist
-check_bg = False
-
-bg_col1, bg_col2 = st.columns([0.55, 0.45])
-with bg_col1:
-    start_bg = st.button(
-        "⏳ Generate in background (keep browsing)",
-        use_container_width=True,
-        key="bg_start"
-    )
-with bg_col2:
-    check_bg = st.button(
-        "🔄 Check status",
-        use_container_width=True,
-        key="bg_check"
-    )
+# ---- Single Generate button (always background) ----
+start_bg = st.button(
+    "🍽️ Generate my meal plan",
+    type="primary",
+    use_container_width=True,
+    key="btn_generate",
+)
 
 if start_bg:
     payload = dict(
@@ -347,17 +336,22 @@ if start_bg:
     )
     st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
     st.session_state["bg_payload"] = payload
-    st.info("Cooking your plan in the background… you can keep browsing tabs and adjusting filters.")
-
+    st.toast("Cooking your plan in the background…", icon="🍳")
+# ---- Background watcher (runs every rerun) ----
 bg_future = st.session_state.get("bg_future")
 if bg_future:
     if bg_future.done():
         try:
             result_plan = bg_future.result()
             if result_plan:
+                # Optional: if you added dedupe_plan() earlier, keep this; otherwise it's safe to leave out.
+                try:
+                    result_plan = dedupe_plan(result_plan, filtered)
+                except Exception:
+                    pass
                 st.session_state.plan = result_plan
                 st.session_state.filters_sig = st.session_state.get("bg_payload", {}).get("sig")
-                st.success("✅ Your plan is ready!")
+                st.toast("Plan ready!", icon="✅")
             else:
                 st.warning("Background generation returned no plan.")
         except Exception as e:
@@ -367,9 +361,7 @@ if bg_future:
             st.session_state["bg_payload"] = None
             st.rerun()
     else:
-        st.caption("Still working… click **Check status** to refresh.")
-        if check_bg:
-            st.rerun()
+        st.caption("Cooking… you can keep browsing. This will refresh when ready.")
 
 # If a plan file was uploaded (Dev Mode), read it and set the current plan
 if uploaded is not None:
@@ -399,38 +391,11 @@ if st.session_state.get("plan"):
             st.session_state.plan[d] = fallback.get(i, [])
         st.success(f"Added {len(missing_days)} day(s) from our cookbook to complete your week.")
 
-# Decide if we should (re)generate
-# Only generate when the user clicks the button.
-should_generate = bool(gen_clicked)
 
 # Optional: if inputs changed since last generation, show a gentle nudge (no auto-generate).
 existing_plan = st.session_state.get("plan")
 if existing_plan and st.session_state.get("filters_sig") != sig:
     st.info("Your preferences changed. Click **Generate / Regenerate plan** to update.")
-
-if should_generate:
-    if use_ai:
-        ai_plan = generate_ai_menu_with_recipes(
-            days=days,
-            meals_per_day=meals_per_day,
-            diets=list(diet_flags),
-            allergies=normalize_tokens(allergies),
-            exclusions=normalize_tokens(exclusions),
-            cuisines=list(cuisines),
-            calorie_target=st.session_state.calorie_target if st.session_state.is_premium else None,
-        )
-        if ai_plan:
-            st.session_state.plan = ai_plan
-        else:
-            st.session_state.plan = {}
-            st.stop()
-    else:
-        st.session_state.plan = pick_meals(
-            filtered, meals_per_day, days,
-            st.session_state.calorie_target if st.session_state.is_premium else None
-        )
-    st.session_state.filters_sig = sig
-
 
 # Use the plan from session (safe when empty)
 plan = st.session_state.get("plan", {}) or {}
@@ -455,7 +420,6 @@ if view == "Today":
                 "2. Choose **Recipe source** (from our cookbook or create new recipes).\n"
                 "3. Click **Generate my meal plan**."
             )
-            st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True, key="gen_btn_empty")
         st.stop()
 
     max_day = max(plan.keys())
