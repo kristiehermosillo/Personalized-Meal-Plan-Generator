@@ -281,8 +281,6 @@ if not filtered:
 import hashlib
 
 st.subheader(f"Your {days}-day plan")
-# Generate button (back in main content area)
-gen_clicked = st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True)
 
 # Friendlier wording for normal users (no “AI” language)
 if st.session_state.is_premium:
@@ -314,29 +312,7 @@ def make_filters_signature() -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 sig = make_filters_signature()
-# ---- Single Generate button (always background) ----
-start_bg = st.button(
-    "🍽️ Generate my meal plan",
-    type="primary",
-    use_container_width=True,
-    key="btn_generate",
-)
 
-if start_bg:
-    payload = dict(
-        use_ai=bool(use_ai),
-        days=days,
-        meals_per_day=meals_per_day,
-        diets=list(diet_flags),
-        allergies=normalize_tokens(allergies),
-        exclusions=normalize_tokens(exclusions),
-        cuisines=list(cuisines),
-        cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
-        sig=sig,
-    )
-    st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
-    st.session_state["bg_payload"] = payload
-    st.toast("Cooking your plan in the background…", icon="🍳")
 # ---- Background watcher (runs every rerun) ----
 bg_future = st.session_state.get("bg_future")
 if bg_future:
@@ -395,7 +371,8 @@ if st.session_state.get("plan"):
 # Optional: if inputs changed since last generation, show a gentle nudge (no auto-generate).
 existing_plan = st.session_state.get("plan")
 if existing_plan and st.session_state.get("filters_sig") != sig:
-    st.info("Your preferences changed. Click **Generate / Regenerate plan** to update.")
+    st.info("Your preferences changed. Click **Generate my meal plan** to update.")
+
 
 # Use the plan from session (safe when empty)
 plan = st.session_state.get("plan", {}) or {}
@@ -420,8 +397,33 @@ if view == "Today":
                 "2. Choose **Recipe source** (from our cookbook or create new recipes).\n"
                 "3. Click **Generate my meal plan**."
             )
+    
+            # THE single button – always background
+            clicked = st.button(
+                "🍽️ Generate my meal plan",
+                type="primary",
+                use_container_width=True,
+                key="gen_btn_empty",
+            )
+            if clicked:
+                payload = dict(
+                    use_ai=bool(use_ai),
+                    days=days,
+                    meals_per_day=meals_per_day,
+                    diets=list(diet_flags),
+                    allergies=normalize_tokens(allergies),
+                    exclusions=normalize_tokens(exclusions),
+                    cuisines=list(cuisines),
+                    cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
+                    sig=sig,
+                )
+                st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
+                st.session_state["bg_payload"] = payload
+                st.info("Cooking your plan in the background… you can keep browsing.")
+                st.rerun()
+    
         st.stop()
-
+        
     max_day = max(plan.keys())
 
     # Horizontal day picker (no slider)
