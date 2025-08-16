@@ -284,47 +284,6 @@ st.subheader(f"Your {days}-day plan")
 # Generate button (back in main content area)
 gen_clicked = st.button("🍽️ Generate my meal plan", type="primary", use_container_width=True)
 
-# If user clicked background, submit a job
-if start_bg:
-    payload = dict(
-        use_ai=bool(use_ai),
-        days=days,
-        meals_per_day=meals_per_day,
-        diets=list(diet_flags),
-        allergies=normalize_tokens(allergies),
-        exclusions=normalize_tokens(exclusions),
-        cuisines=list(cuisines),
-        cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
-        sig=sig,  # so we can tag the cache/filters used
-    )
-    st.session_state["bg_future"] = _get_executor().submit(_bg_run_generation, payload, filtered)
-    st.session_state["bg_payload"] = payload
-    st.info("Cooking your plan in the background… you can keep browsing tabs and adjusting filters.")
-
-# If there is a background job, show live status and collect result when done
-bg_future = st.session_state.get("bg_future")
-if bg_future:
-    if bg_future.done():
-        try:
-            result_plan = bg_future.result()
-            if result_plan:
-                st.session_state.plan = result_plan
-                st.session_state.filters_sig = st.session_state.get("bg_payload", {}).get("sig")
-                st.success("✅ Your plan is ready!")
-            else:
-                st.warning("Background generation returned no plan.")
-        except Exception as e:
-            st.error(f"Background generation failed: {e}")
-        finally:
-            st.session_state["bg_future"] = None
-            st.session_state["bg_payload"] = None
-            # immediately rerender with the finished plan
-            st.rerun()
-    else:
-        st.caption("Still working… click **Check status** to refresh.")
-        if check_bg:
-            st.rerun()
-
 # Friendlier wording for normal users (no “AI” language)
 if st.session_state.is_premium:
     source_choice = st.radio(
