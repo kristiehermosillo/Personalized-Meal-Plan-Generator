@@ -26,7 +26,6 @@ if "pick_meals_ai" not in globals():
         return pick_meals(*args, **kwargs)
         
 def _bg_run_generation(payload: dict, filtered_recipes: list[dict]):
-    """Runs outside the Streamlit run loop (no st.* calls here)."""
     if payload["use_ai"]:
         return generate_ai_menu_with_recipes(
             days=payload["days"],
@@ -36,6 +35,7 @@ def _bg_run_generation(payload: dict, filtered_recipes: list[dict]):
             exclusions=payload["exclusions"],
             cuisines=payload["cuisines"],
             calorie_target=payload["cal_target"],
+            ui=False,  # <— CRITICAL: no Streamlit calls in background thread
         )
     else:
         return pick_meals(
