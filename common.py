@@ -292,6 +292,7 @@ def _find_alternative_recipe(
 
 # === AI: generate brand-new recipes with ingredients & steps ===
 from typing import Callable, Optional
+from threading import Thread, Event
 
 def generate_ai_menu_with_recipes(
     days: int,
@@ -307,12 +308,24 @@ def generate_ai_menu_with_recipes(
     """Create recipes plus a weekly plan and return {day: [recipe_like,...]}."""
 
     def _pcb(step: int, total: int, note: str = ""):
-        # safe progress-callback (won't crash the worker if UI is gone)
         if progress_cb:
             try:
                 progress_cb(step, total, note)
             except Exception:
                 pass
+
+    # little background “heartbeat” so the UI looks alive during long requests
+    def _start_ticker(step: int, total: int, label: str) -> Event:
+        stop = Event()
+        def _tick():
+            dots = ""
+            while not stop.is_set():
+                dots = "." if dots == "..." else dots + "."
+                _pcb(step, total, f"{label}{dots}")
+                time.sleep(1.0)
+        t = Thread(target=_tick, daemon=True)
+        t.start()
+        return stop
 
     def _primary_protein(ingredients: list[dict]) -> str:
         txt = " ".join(str(i.get("item", "")).lower() for i in (ingredients or []))
@@ -394,7 +407,7 @@ def generate_ai_menu_with_recipes(
         "You are a meal planning chef. Generate complete, practical recipes with common ingredients. "
         "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
         "Return JSON only. No markdown. No prose. Use double quotes everywhere. "
-        'All units must be strings like "g", "tbsp", "tsp", "cup". '
+        'All units must be strings like \"g\", \"tbsp\", \"tsp\", \"cup\". '
         "Output ONLY strict JSON. No code fences, no commentary."
     )
 
@@ -434,7 +447,7 @@ def generate_ai_menu_with_recipes(
             })
         return meals_out
 
-    def _ask_once(day_idx: int, extra_hint: str = "") -> tuple[str | None, dict | None]:
+    def _ask_once(day_idx: int, day_constraints: dict, extra_hint: str = "") -> tuple[str | None, dict | None]:
         messages = [
             {"role": "system", "content": system_msg},
             {"role": "user", "content":
@@ -450,13 +463,18 @@ def generate_ai_menu_with_recipes(
                 + "\n\nReturn ONLY one day's JSON (a single item in 'plan' for 'day')."
             },
         ]
+
+        # heartbeat while the network call is in-flight
+        ticker = _start_ticker(day_idx-1, days, f"planning day {day_idx}")
         try:
-            resp = call_openrouter(messages, model=model, max_tokens=1800)
-            raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
-        except Exception as e:
-            # still advance the "heartbeat" so UI doesn't look stalled
-            _pcb(day_idx-1, days, f"day {day_idx}: request failed, retrying…")
-            return None, None
+            try:
+                resp = call_openrouter(messages, model=model, max_tokens=1800)
+                raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
+            except Exception:
+                _pcb(day_idx-1, days, f"day {day_idx}: request failed, retrying…")
+                return None, None
+        finally:
+            ticker.set()   # stop the heartbeat as soon as the call returns
 
         cleaned = _clean_json(_extract_json(raw))
         try:
@@ -471,26 +489,21 @@ def generate_ai_menu_with_recipes(
     _pcb(0, days, "starting")
 
     for day_idx in range(1, days + 1):
-        # pulse at the beginning of the day
-        _pcb(day_idx-1, days, f"planning day {day_idx}…")
-
         day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
         day_constraints["force_day"] = day_idx
         day_constraints["ban_recipes"] = sorted(seen_recipe_names)
         day_constraints["avoid_primary_proteins"] = list(dict.fromkeys(seen_primary_proteins[-2:]))
 
-        raw, parsed = _ask_once(day_idx)
+        raw, parsed = _ask_once(day_idx, day_constraints)
         if parsed is None:
-            # try a single stronger retry
-            raw, parsed = _ask_once(day_idx,
+            raw, parsed = _ask_once(
+                day_idx, day_constraints,
                 extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly."
             )
 
-        # Success path
         if parsed is not None:
             meals_today = _normalize_day(parsed)
-            # track variety
             for m in meals_today:
                 seen_recipe_names.add(m.get("name",""))
                 pp = _primary_protein(m.get("ingredients", []))
@@ -500,7 +513,7 @@ def generate_ai_menu_with_recipes(
             _pcb(day_idx, days, f"planned day {day_idx}")
             continue
 
-        # Fallback path (DB-based) so the week stays complete
+        # fallback: pick from built-in DB so the week stays complete
         fallback_meals: list[dict] = []
         for slot in slots:
             alt = _find_alternative_recipe(
@@ -522,11 +535,11 @@ def generate_ai_menu_with_recipes(
             plan_dict[day_idx] = fallback_meals
             _pcb(day_idx, days, f"planned day {day_idx} (fallback)")
         else:
-            # even if totally empty, advance progress so the bar moves
             _pcb(day_idx, days, f"skipped day {day_idx}")
 
     _pcb(days, days, "complete")
     return plan_dict
+
 
 # ===== Plan → DataFrame & Shopping list =====
 
