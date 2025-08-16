@@ -302,13 +302,15 @@ def generate_ai_menu_with_recipes(
     cuisines: list[str] | None = None,
     calorie_target: int | None = None,
     model: str = OPENROUTER_MODEL,
-    progress_cb: Optional[Callable[[int, int, str], None]] = None,  # <— NEW
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,  # progress hook
 ) -> dict[int, list[dict]]:
     """Create recipes plus a weekly plan and return {day: [recipe_like,...]}."""
 
     def _primary_protein(ingredients: list[dict]) -> str:
         txt = " ".join(str(i.get("item", "")).lower() for i in (ingredients or []))
-        for k in ["chicken","turkey","beef","pork","salmon","tuna","shrimp","tofu","tempeh","egg","eggs","chickpea","chickpeas","lentil","lentils","beans"]:
+        for k in ["chicken","turkey","beef","pork","salmon","tuna","shrimp",
+                  "tofu","tempeh","egg","eggs","chickpea","chickpeas","lentil",
+                  "lentils","beans"]:
             if k in txt:
                 return k
         return ""
@@ -384,20 +386,29 @@ def generate_ai_menu_with_recipes(
 
     system_msg = (
         "You are a meal planning chef. Generate complete, practical recipes with common ingredients. "
-        "Respect diets/allergies and the requested slots. Aim near the daily calorie target. "
-        "Return JSON only (no markdown, no prose). Use double quotes. "
-        "All units must be strings like \"g\",\"tbsp\",\"tsp\",\"cup\"."
+        "Respect diets and allergies and the requested slots. Aim near the daily calorie target. "
+        "Return JSON only. No markdown. No prose. Use double quotes everywhere. "
+        "All units must be strings like \"g\", \"tbsp\", \"tsp\", \"cup\". "
+        "Output ONLY strict JSON. No code fences, no commentary, and no bullets or list markers."
     )
+
+    # Seed progress
+    if progress_cb:
+        progress_cb(0, days, "starting")
+
+    plan_dict: dict[int, list[dict]] = {}
+    seen_recipe_names: set[str] = set()
+    seen_primary_proteins: list[str] = []
 
     def _normalize_day(parsed_json: dict) -> list[dict]:
         blocks = parsed_json.get("plan", [])
         if not isinstance(blocks, list) or not blocks:
             return []
         block = blocks[0]
-        meals_out: list[dict] = []
+        out: list[dict] = []
         for m in block.get("meals", []):
             r = m.get("recipe", {}) or {}
-            meals_out.append({
+            out.append({
                 "name": r.get("name", "Recipe").strip(),
                 "course": (r.get("course") or m.get("slot") or "any").lower(),
                 "cuisine": r.get("cuisine", ""),
@@ -419,70 +430,76 @@ def generate_ai_menu_with_recipes(
                 ],
                 "steps": [str(s).strip() for s in (r.get("steps") or []) if str(s).strip()],
             })
-        return meals_out
-
-    plan_dict: dict[int, list[dict]] = {}
-    seen_recipe_names: set[str] = set()
-    seen_primary_proteins: list[str] = []
-
-    if progress_cb:
-        progress_cb(0, days, "starting")
+        return out
 
     for day_idx in range(1, days + 1):
         if progress_cb:
-            progress_cb(day_idx - 1, days, f"day {day_idx}: contacting model")
+            progress_cb(day_idx - 1, days, f"generating day {day_idx}")
 
         day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
         day_constraints["force_day"] = day_idx
         day_constraints["ban_recipes"] = sorted(seen_recipe_names)
+        # Avoid repeating the same main protein more than ~every 2 days
         day_constraints["avoid_primary_proteins"] = list(dict.fromkeys(seen_primary_proteins[-2:]))
 
-        def _ask_once(extra_hint: str = "") -> tuple[str | None, dict | None]:
-            messages = [
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content":
-                    "Schema (strict):\n"
-                    + json.dumps(schema)
-                    + "\n\nConstraints for THIS response only:\n"
-                    + json.dumps(day_constraints)
-                    + "\n\nVariety rules:\n"
-                    + "- Never repeat an exact recipe name in any other day. Do not use any name in 'ban_recipes'.\n"
-                    + "- Rotate the main protein; prefer NOT to use any in 'avoid_primary_proteins'.\n"
-                    + "- Vary breakfasts over the week.\n"
-                    + extra_hint
-                    + "\n\nReturn ONLY one day's JSON (a single item in 'plan' for 'day')."
-                },
-            ]
-            try:
-                resp = call_openrouter(messages, model=model, max_tokens=1800)
-                raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
-            except Exception as e:
-                st.error(f"AI request failed for day {day_idx}: {e}")
-                return None, None
+        # --- ask model once (best-effort) ---
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content":
+                "Schema (strict):\n"
+                + json.dumps(schema)
+                + "\n\nConstraints for THIS response only:\n"
+                + json.dumps(day_constraints)
+                + "\n\nVariety rules:\n"
+                + "- Never repeat an exact recipe name in any other day. Do not use any name in 'ban_recipes'.\n"
+                + "- Try to rotate the main protein; prefer NOT to use any in 'avoid_primary_proteins'.\n"
+                + "- Vary breakfasts over the week.\n"
+                + "\n\nReturn ONLY one day's JSON (a single item in 'plan' for 'day')."
+            },
+        ]
 
+        raw = ""
+        parsed = None
+        try:
+            resp = call_openrouter(messages, model=model, max_tokens=1800)
+            raw = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
             cleaned = _clean_json(_extract_json(raw))
-            try:
-                parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
-            except ValueError as e:
-                st.error(str(e))
-                with st.expander(f"Show AI raw output (day {day_idx})"):
-                    st.code(raw[:6000])
-                with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
-                    st.code(cleaned[:6000], language="json")
-                return None, None
+            parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
+        except Exception:
+            parsed = None  # fall back below
 
-            return raw, parsed
+        meals_out: list[dict] = []
+        if parsed:
+            meals_out = _normalize_day(parsed)
 
-        raw, parsed = _ask_once()
-        if parsed is None:
-            raw, parsed = _ask_once(
-                extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly."
-            )
+            # Replace duplicate names with DB fallbacks
+            fixed: list[dict] = []
+            for i, m in enumerate(meals_out):
+                nm = m.get("name", "").strip()
+                if nm and nm in seen_recipe_names:
+                    alt = _find_alternative_recipe(
+                        target_slot=(m.get("course") or slots[i if i < len(slots) else -1]),
+                        diets=diets or [], allergies=allergies or [],
+                        exclusions=exclusions or [], cuisines=cuisines or [],
+                        seen_names=seen_recipe_names,
+                    )
+                    if alt:
+                        fixed.append(alt)
+                        nm = alt.get("name", "").strip()
+                        if nm: seen_recipe_names.add(nm)
+                        prot = _primary_protein(alt.get("ingredients", []))
+                        if prot: seen_primary_proteins.append(prot)
+                        continue
+                fixed.append(m)
+                if nm: seen_recipe_names.add(nm)
+                prot = _primary_protein(m.get("ingredients", []))
+                if prot: seen_primary_proteins.append(prot)
+            meals_out = fixed
 
-        if parsed is None:
-            # fallback from built-in DB so the week stays complete
-            fallback_meals: list[dict] = []
+        # If model failed or gave nothing, use cookbook fallbacks for this day
+        if not meals_out:
+            meals_out = []
             for slot in slots:
                 alt = _find_alternative_recipe(
                     target_slot=slot,
@@ -493,38 +510,18 @@ def generate_ai_menu_with_recipes(
                     seen_names=seen_recipe_names,
                 )
                 if alt:
-                    fallback_meals.append(alt)
-                    seen_recipe_names.add(alt["name"])
+                    meals_out.append(alt)
+                    nm = alt.get("name", "").strip()
+                    if nm: seen_recipe_names.add(nm)
                     prot = _primary_protein(alt.get("ingredients", []))
-                    if prot:
-                        seen_primary_proteins.append(prot)
-            if fallback_meals:
-                plan_dict[day_idx] = fallback_meals
-                if progress_cb:
-                    progress_cb(day_idx, days, f"day {day_idx} done (fallback)")
-                continue
-            # if nothing at all, just skip this day
+                    if prot: seen_primary_proteins.append(prot)
+
+        if meals_out:
+            plan_dict[day_idx] = meals_out
             if progress_cb:
-                progress_cb(day_idx, days, f"day {day_idx} skipped")
-            continue
+                progress_cb(day_idx, days, f"day {day_idx} done")
 
-        # success path
-        meals = _normalize_day(parsed)
-        if not meals:
-            if progress_cb:
-                progress_cb(day_idx, days, f"day {day_idx} empty")
-            continue
-
-        plan_dict[day_idx] = meals
-        for r in meals:
-            seen_recipe_names.add(r.get("name", ""))
-            prot = _primary_protein(r.get("ingredients", []))
-            if prot:
-                seen_primary_proteins.append(prot)
-
-        if progress_cb:
-            progress_cb(day_idx, days, f"day {day_idx} done")
-
+    # Done
     if progress_cb:
         progress_cb(days, days, "complete")
     return plan_dict
