@@ -384,6 +384,12 @@ if bg_future and job_id:
     else:
         st.caption(f"Last update {int(idle)}s ago · you can keep browsing.")
 
+    # NEW: auto-refresh the page while the job is running
+    auto = st.toggle("Auto-refresh progress", value=True, key="bg_auto_refresh")
+    if auto and not bg_future.done():
+        time.sleep(1.2)
+        st.rerun()
+
     if st.button("🔄 Refresh status", key="bg_refresh", use_container_width=True):
         st.rerun()
 
@@ -408,6 +414,7 @@ if bg_future and job_id:
             st.session_state["bg_payload"] = None
             st.session_state["bg_job_id"] = None
             st.rerun()
+
 
 # If a plan file was uploaded (Dev Mode), read it and set the current plan
 if uploaded is not None:
