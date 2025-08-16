@@ -361,7 +361,7 @@ if bg_future and job_id:
             result_plan = bg_future.result()
             if result_plan:
                 try:
-                    result_plan = dedupe_plan(result_plan, filtered)  # safe if dedupe_plan doesn't exist
+                    result_plan = dedupe_plan(result_plan, filtered)  # ok if this no-ops
                 except Exception:
                     pass
                 st.session_state.plan = result_plan
@@ -466,7 +466,6 @@ if view == "Today":
                 st.session_state["bg_payload"] = payload
                 st.toast("Cooking your plan in the background…", icon="🍳")
                 st.rerun()
-            
                 
         st.stop()
         
