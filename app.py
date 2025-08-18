@@ -705,78 +705,78 @@ elif view == "Weekly Overview":
             else:
                 st.write("No pantry items entered.")
 
-       with left:
-            # ✅ Interactive checklist for your shopping list (no CSVs)
-            # Rebuild the display DataFrame exactly like before
-            shop_display = need_df.copy() if annotate else need_df
-            if annotate and not need_df.empty:
-                norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
-                shop_display["item"] = shop_display["item"].astype(str).apply(
-                    lambda x: f"{x} (have)" if x.lower() in norm_have else x
-                )
-        
-            # If no items, show a friendly message
-            if shop_display is None or shop_display.empty:
-                st.info("Your shopping list is empty.")
-            else:
-                # Keep checkbox state stable across reruns and regenerate if the list changes
-                signature = "|".join(shop_display["item"].astype(str).tolist())
-                if "shop_checked" not in st.session_state or st.session_state.get("shop_keys_sig") != signature:
-                    st.session_state.shop_checked = {str(row["item"]): False for _, row in shop_display.iterrows()}
-                    st.session_state.shop_keys_sig = signature
-        
-                st.markdown("### 🛒 Shopping Checklist")
-        
-                btn1, btn2 = st.columns(2)
-                with btn1:
-                    if st.button("Mark all"):
-                        for k in st.session_state.shop_checked:
-                            st.session_state.shop_checked[k] = True
-                        st.rerun()
-                with btn2:
-                    if st.button("Clear all"):
-                        for k in st.session_state.shop_checked:
-                            st.session_state.shop_checked[k] = False
-                        st.rerun()
-        
-                # Render checkboxes (one per item)
-                for _, row in shop_display.iterrows():
-                    label = f'{row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
-                    key = f'chk_{row["item"]}'
-                    current = st.session_state.shop_checked.get(row["item"], False)
-                    checked = st.checkbox(label, value=current, key=key)
-                    st.session_state.shop_checked[row["item"]] = checked
-        
-                # Build a plain-text version for Notes / copy-paste
-                text_lines = [f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip() for _, row in shop_display.iterrows()]
-                note_text = "Shopping List\n" + "\n".join(text_lines)
-        
-                st.markdown("#### 📋 Copy to your Notes app")
-                st.text_area("Copy this list:", value=note_text, height=160, label_visibility="collapsed")
-                st.download_button(
-                    "Save as Note (.txt)",
-                    data=note_text.encode("utf-8"),
-                    file_name="Shopping List.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-        
-                # Keep your pantry expander (unchanged)
-                with st.expander("Pantry items (matched)"):
-                    have_display = have_df.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
-                    if have_display.empty:
-                        st.write("No matches.")
-                    else:
-                        st.dataframe(
-                            have_display,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Item":     st.column_config.TextColumn(width="large"),
-                                "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
-                                "Unit":     st.column_config.TextColumn(width="small"),
-                            },
-                        )
+           with left:
+                # ✅ Interactive checklist for your shopping list (no CSVs)
+                # Rebuild the display DataFrame exactly like before
+                shop_display = need_df.copy() if annotate else need_df
+                if annotate and not need_df.empty:
+                    norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
+                    shop_display["item"] = shop_display["item"].astype(str).apply(
+                        lambda x: f"{x} (have)" if x.lower() in norm_have else x
+                    )
+            
+                # If no items, show a friendly message
+                if shop_display is None or shop_display.empty:
+                    st.info("Your shopping list is empty.")
+                else:
+                    # Keep checkbox state stable across reruns and regenerate if the list changes
+                    signature = "|".join(shop_display["item"].astype(str).tolist())
+                    if "shop_checked" not in st.session_state or st.session_state.get("shop_keys_sig") != signature:
+                        st.session_state.shop_checked = {str(row["item"]): False for _, row in shop_display.iterrows()}
+                        st.session_state.shop_keys_sig = signature
+            
+                    st.markdown("### 🛒 Shopping Checklist")
+            
+                    btn1, btn2 = st.columns(2)
+                    with btn1:
+                        if st.button("Mark all"):
+                            for k in st.session_state.shop_checked:
+                                st.session_state.shop_checked[k] = True
+                            st.rerun()
+                    with btn2:
+                        if st.button("Clear all"):
+                            for k in st.session_state.shop_checked:
+                                st.session_state.shop_checked[k] = False
+                            st.rerun()
+            
+                    # Render checkboxes (one per item)
+                    for _, row in shop_display.iterrows():
+                        label = f'{row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
+                        key = f'chk_{row["item"]}'
+                        current = st.session_state.shop_checked.get(row["item"], False)
+                        checked = st.checkbox(label, value=current, key=key)
+                        st.session_state.shop_checked[row["item"]] = checked
+            
+                    # Build a plain-text version for Notes / copy-paste
+                    text_lines = [f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip() for _, row in shop_display.iterrows()]
+                    note_text = "Shopping List\n" + "\n".join(text_lines)
+            
+                    st.markdown("#### 📋 Copy to your Notes app")
+                    st.text_area("Copy this list:", value=note_text, height=160, label_visibility="collapsed")
+                    st.download_button(
+                        "Save as Note (.txt)",
+                        data=note_text.encode("utf-8"),
+                        file_name="Shopping List.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+            
+                    # Keep your pantry expander (unchanged)
+                    with st.expander("Pantry items (matched)"):
+                        have_display = have_df.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
+                        if have_display.empty:
+                            st.write("No matches.")
+                        else:
+                            st.dataframe(
+                                have_display,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Item":     st.column_config.TextColumn(width="large"),
+                                    "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
+                                    "Unit":     st.column_config.TextColumn(width="small"),
+                                },
+                            )
 
             shop_display = shop_display.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
             st.dataframe(
