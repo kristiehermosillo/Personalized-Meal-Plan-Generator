@@ -686,7 +686,8 @@ elif view == "Weekly Overview":
 
     with tab_shop:
         left, right = st.columns([0.65, 0.35])
-
+    
+        # --- RIGHT column (keep your controls) ---
         with right:
             new_hh = st.number_input(
                 "People you’re cooking for",
@@ -698,57 +699,58 @@ elif view == "Weekly Overview":
                 hh_size = int(new_hh)
                 df_shop2 = consolidate_shopping_list(plan, household_size=hh_size)
                 need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
-
+    
             st.caption("Pantry matching")
             if pantry_items:
                 st.write(f"Matched against: {', '.join(pantry_items)}")
             else:
                 st.write("No pantry items entered.")
-
-          with left:
-            # ✅ Interactive checklist for your shopping list (no CSVs)
+    
+        # --- LEFT column (interactive checklist) ---
+        with left:
             shop_display = need_df.copy() if annotate else need_df
             if annotate and not need_df.empty:
                 norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
                 shop_display["item"] = shop_display["item"].astype(str).apply(
                     lambda x: f"{x} (have)" if x.lower() in norm_have else x
                 )
-        
+    
             if shop_display is None or shop_display.empty:
                 st.info("Your shopping list is empty.")
             else:
-                # Keep checkbox state stable across reruns and regenerate if the list changes
+                st.markdown("### 🛒 Shopping Checklist")
+    
+                # keep checkbox state stable across reruns
                 signature = "|".join(shop_display["item"].astype(str).tolist())
                 if "shop_checked" not in st.session_state or st.session_state.get("shop_keys_sig") != signature:
-                    # use numeric indices to avoid duplicate-key issues
                     st.session_state.shop_checked = {i: False for i in range(len(shop_display))}
                     st.session_state.shop_keys_sig = signature
-        
-                st.markdown("### 🛒 Shopping Checklist")
-        
-                colA, colB = st.columns(2)
-                with colA:
+    
+                c1, c2 = st.columns(2)
+                with c1:
                     if st.button("Mark all"):
                         for i in st.session_state.shop_checked:
                             st.session_state.shop_checked[i] = True
                         st.rerun()
-                with colB:
+                with c2:
                     if st.button("Clear all"):
                         for i in st.session_state.shop_checked:
                             st.session_state.shop_checked[i] = False
                         st.rerun()
-        
-                # Render checkboxes (one per item)
+    
                 for idx, row in shop_display.reset_index(drop=True).iterrows():
                     label = f'{row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
-                    checked = st.checkbox(label, value=st.session_state.shop_checked.get(idx, False), key=f"chk_{idx}")
-                    st.session_state.shop_checked[idx] = checked
-        
-                # Build a plain-text version for Notes / copy-paste
+                    st.session_state.shop_checked[idx] = st.checkbox(
+                        label,
+                        value=st.session_state.shop_checked.get(idx, False),
+                        key=f"chk_{idx}"
+                    )
+    
+                # Copy-friendly text + download as .txt (good for Notes)
                 text_lines = [f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
                               for _, row in shop_display.iterrows()]
                 note_text = "Shopping List\n" + "\n".join(text_lines)
-        
+    
                 st.markdown("#### 📋 Copy to your Notes app")
                 st.text_area("Copy this list:", value=note_text, height=160, label_visibility="collapsed")
                 st.download_button(
@@ -758,37 +760,8 @@ elif view == "Weekly Overview":
                     mime="text/plain",
                     use_container_width=True,
                 )
-        
-                # Pantry expander (same as before)
-                with st.expander("Pantry items (matched)"):
-                    have_display = have_df.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
-                    if have_display.empty:
-                        st.write("No matches.")
-                    else:
-                        st.dataframe(
-                            have_display,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Item":     st.column_config.TextColumn(width="large"),
-                                "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
-                                "Unit":     st.column_config.TextColumn(width="small"),
-                            },
-                        )
-
-
-            shop_display = shop_display.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
-            st.dataframe(
-                shop_display,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Item":     st.column_config.TextColumn(width="large"),
-                    "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
-                    "Unit":     st.column_config.TextColumn(width="small"),
-                },
-            )
-
+    
+            # Pantry matches (unchanged)
             with st.expander("Pantry items (matched)"):
                 have_display = have_df.rename(columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"})
                 if have_display.empty:
@@ -804,27 +777,27 @@ elif view == "Weekly Overview":
                             "Unit":     st.column_config.TextColumn(width="small"),
                         },
                     )
-
-    with tab_totals:
-        day_summary = (
-            plan_display.groupby("Day")[["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]]
-            .sum()
-            .reset_index()
-            .sort_values("Day")
-        )
-        st.dataframe(
-            day_summary,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Day":         st.column_config.NumberColumn(format="%d", width="small"),
-                "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
-                "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
-                "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
-                "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
-            },
-        )
-
+    
+        with tab_totals:
+            day_summary = (
+                plan_display.groupby("Day")[["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]]
+                .sum()
+                .reset_index()
+                .sort_values("Day")
+            )
+            st.dataframe(
+                day_summary,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Day":         st.column_config.NumberColumn(format="%d", width="small"),
+                    "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
+                    "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
+                    "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
+                    "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
+                },
+            )
+    
 
 elif view == "Recipes":
     st.subheader("📖 Recipes in this plan")
