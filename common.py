@@ -449,9 +449,9 @@ def generate_ai_menu_with_recipes(
         progress_cb(0, days, "starting")
 
     for day_idx in range(1, days + 1):
-        # report that we are starting this day
+        # show progress immediately (so UI reads Day 1 of 7 right away)
         if progress_cb:
-            progress_cb(day_idx - 1, days, f"prepping day {day_idx}")
+            progress_cb(day_idx, days, f"planning day {day_idx}")
     
         day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
