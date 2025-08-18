@@ -378,32 +378,22 @@ bg_future = st.session_state.get("bg_future")
 job_id = st.session_state.get("bg_job_id")
 
 if bg_future and job_id:
-    # Auto-rerun the app every 1s while job is running (Community Cloud safe)
+    # Auto-rerun once per second while the job runs
     st_autorefresh(interval=1000, key=f"auto_refresh_{job_id}")
 
-    # Friendly spinner that advances on each rerun (no server calls needed)
+    # Cycle through emojis so the line visibly changes
     SPIN = ["🍳", "🔪", "🥣", "🧂", "⏲️", "🔥"]
-    st.session_state["spin_i"] = (st.session_state.get("spin_i", 0) + 1) % len(SPIN)
+    i = st.session_state.get("spin_i", 0)
+    st.session_state["spin_i"] = (i + 1) % len(SPIN)
     emoji = SPIN[st.session_state["spin_i"]]
 
-    # Show elapsed time since job started
+    # Simple “it’s working” message with elapsed time
     started = float(st.session_state.get("bg_started_ts", time.time()))
     elapsed = int(time.time() - started)
+    dots = "." * (1 + (st.session_state["spin_i"] % 3))
+    st.write(f"{emoji} **Cooking up your plan{dots}** {elapsed}s elapsed")
 
-    # Pull any progress info we may have (ok if it never changes)
-    p = _get_progress(job_id) or {"step": 0, "total": days, "note": "starting", "ts": started}
-    step = int(p.get("step", 0))
-    total = int(p.get("total", days or 1))
-    note  = str(p.get("note", ""))
-
-    # Simple status line that visibly changes every rerun
-    st.caption(f"{emoji} Cooking… {elapsed}s elapsed — Day {step} of {total} {('— ' + note) if note else ''}")
-
-    # Optional light progress bar (it will move if your callback updates 'step')
-    pct = 0.0 if total <= 0 else min(1.0, step / max(1, total))
-    st.progress(pct)
-
-    # When the future finishes, collect result and clean up
+    # When the background job finishes, collect the result and clean up
     if bg_future.done():
         try:
             result_plan = bg_future.result()
