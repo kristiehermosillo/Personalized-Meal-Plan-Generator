@@ -302,7 +302,7 @@ def generate_ai_menu_with_recipes(
     cuisines: list[str] | None = None,
     calorie_target: int | None = None,
     model: str = OPENROUTER_MODEL,
-    progress_cb: Optional[Callable[[int, int, str], None]] = None,  # <-- this is the new param
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> dict[int, list[dict]]:
     """Create recipes plus a weekly plan and return {day: [recipe_like,...]}.
     Sends progress heartbeats while waiting on the model so the UI can animate.
@@ -449,19 +449,20 @@ def generate_ai_menu_with_recipes(
         progress_cb(0, days, "starting")
 
     for day_idx in range(1, days + 1):
-        # show progress immediately (so UI reads Day 1 of 7 right away)
+        # announce the day immediately
         if progress_cb:
             progress_cb(day_idx, days, f"planning day {day_idx}")
-        # start a 1s heartbeat so the UI shows activity while we wait on the model
+
+        # heartbeat while we wait on the model
         step_ref = {"value": day_idx}
-        _ticker_stop = _start_ticker(step_ref, days, note_fn=lambda: f"planning day {day_idx}")
+        ticker_stop = _start_ticker(step_ref, days, note_fn=lambda: f"planning day {day_idx}")
 
         day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
         day_constraints["force_day"] = day_idx
         day_constraints["ban_recipes"] = sorted(seen_recipe_names)
         day_constraints["avoid_primary_proteins"] = list(dict.fromkeys(seen_primary_proteins[-2:]))
-    
+
         def _ask_once(extra_hint: str = "") -> tuple[str | None, dict | None]:
             messages = [
                 {"role": "system", "content": system_msg},
@@ -484,7 +485,7 @@ def generate_ai_menu_with_recipes(
             except Exception as e:
                 st.error(f"AI request failed for day {day_idx}: {e}")
                 return None, None
-    
+
             cleaned = _clean_json(_extract_json(raw))
             try:
                 parsed = _safe_json_load(cleaned, day_idx=day_idx, raw=raw)
@@ -495,15 +496,15 @@ def generate_ai_menu_with_recipes(
                 with st.expander(f"Show cleaned JSON we tried to parse (day {day_idx})"):
                     st.code(cleaned[:6000], language="json")
                 return None, None
-    
+
             return raw, parsed
-    
+
         raw, parsed = _ask_once()
         if parsed is None:
             raw, parsed = _ask_once(
                 extra_hint="\n- Your previous output was invalid or duplicated names. Use different recipes and match the schema exactly."
             )
-    
+
         if parsed is None:
             # fallback: build this day from our DB
             fallback_meals: list[dict] = []
@@ -520,19 +521,24 @@ def generate_ai_menu_with_recipes(
                     fallback_meals.append(alt)
                     seen_recipe_names.add(alt["name"])
                     pprot = _primary_protein(alt.get("ingredients", []))
-                    if pprot: seen_primary_proteins.append(pprot)
-    
+                    if pprot:
+                        seen_primary_proteins.append(pprot)
+
             if fallback_meals:
                 plan_dict[day_idx] = fallback_meals
                 if progress_cb:
                     progress_cb(day_idx, days, f"day {day_idx} ready (fallback)")
-                        try: _ticker_stop["flag"] = True
-                        except: pass
             else:
                 if progress_cb:
                     progress_cb(day_idx, days, f"day {day_idx} skipped")
+
+            # stop the heartbeat for this day
+            try:
+                ticker_stop["flag"] = True
+            except Exception:
+                pass
             continue
-    
+
         # success path — normalize & store
         meals_out = _normalize_day(parsed)
         if meals_out:
@@ -540,15 +546,20 @@ def generate_ai_menu_with_recipes(
             for m in meals_out:
                 seen_recipe_names.add(m.get("name", ""))
                 pprot = _primary_protein(m.get("ingredients", []))
-                if pprot: seen_primary_proteins.append(pprot)
-    
+                if pprot:
+                    seen_primary_proteins.append(pprot)
+
             if progress_cb:
                 progress_cb(day_idx, days, f"day {day_idx} ready")
-                # stop the heartbeat for this day
-                try: _ticker_stop["flag"] = True
-                except: pass
+
+        # stop the heartbeat for this day (success case)
+        try:
+            ticker_stop["flag"] = True
+        except Exception:
+            pass
 
     return plan_dict
+
 
 # ===== Plan → DataFrame & Shopping list =====
 
