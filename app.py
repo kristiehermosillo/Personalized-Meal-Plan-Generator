@@ -120,6 +120,15 @@ except Exception:
 
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
+st.markdown("""
+<style>
+.cook-banner{font-size:1.25rem;font-weight:700;margin:8px 0 14px;padding:12px 14px;
+  border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.05);
+  display:flex;gap:.6rem;align-items:center}
+.cook-emoji{font-size:1.6rem;line-height:1}
+.cook-faint{opacity:.75;font-weight:500}
+</style>
+""", unsafe_allow_html=True)
 
 # --- sanity check: is the OpenRouter key visible? (don’t print the key) ---
 if st.session_state.get("use_ai_toggle", False):  # only show when AI toggle is on
@@ -391,7 +400,11 @@ if bg_future and job_id:
     started = float(st.session_state.get("bg_started_ts", time.time()))
     elapsed = int(time.time() - started)
     dots = "." * (1 + (st.session_state["spin_i"] % 3))
-    st.write(f"{emoji} **Cooking up your plan{dots}** {elapsed}s elapsed")
+    st.markdown(
+    f"<div class='cook-banner'><span class='cook-emoji'>{emoji}</span>"
+    f"<span>Cooking up your plan… <span class='cook-faint'>{elapsed}s elapsed</span></span></div>",
+    unsafe_allow_html=True
+)
 
     # When the background job finishes, collect the result and clean up
     if bg_future.done():
