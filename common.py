@@ -302,7 +302,7 @@ def generate_ai_menu_with_recipes(
     cuisines: list[str] | None = None,
     calorie_target: int | None = None,
     model: str = OPENROUTER_MODEL,
-    progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    progress_cb: Optional[Callable[[int, int, str], None]] = None,  # <-- this is the new param
 ) -> dict[int, list[dict]]:
     """Create recipes plus a weekly plan and return {day: [recipe_like,...]}.
     Sends progress heartbeats while waiting on the model so the UI can animate.
@@ -452,7 +452,10 @@ def generate_ai_menu_with_recipes(
         # show progress immediately (so UI reads Day 1 of 7 right away)
         if progress_cb:
             progress_cb(day_idx, days, f"planning day {day_idx}")
-    
+        # start a 1s heartbeat so the UI shows activity while we wait on the model
+        step_ref = {"value": day_idx}
+        _ticker_stop = _start_ticker(step_ref, days, note_fn=lambda: f"planning day {day_idx}")
+
         day_constraints = dict(base_constraints)
         day_constraints["days"] = 1
         day_constraints["force_day"] = day_idx
@@ -523,6 +526,8 @@ def generate_ai_menu_with_recipes(
                 plan_dict[day_idx] = fallback_meals
                 if progress_cb:
                     progress_cb(day_idx, days, f"day {day_idx} ready (fallback)")
+                        try: _ticker_stop["flag"] = True
+                        except: pass
             else:
                 if progress_cb:
                     progress_cb(day_idx, days, f"day {day_idx} skipped")
@@ -539,6 +544,9 @@ def generate_ai_menu_with_recipes(
     
             if progress_cb:
                 progress_cb(day_idx, days, f"day {day_idx} ready")
+                # stop the heartbeat for this day
+                try: _ticker_stop["flag"] = True
+                except: pass
 
     return plan_dict
 
