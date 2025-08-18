@@ -362,6 +362,7 @@ if show_generate_bar:
         job_id = uuid.uuid4().hex
         st.session_state["bg_job_id"] = job_id
         _set_progress(job_id, 0, days, "starting")
+        st.session_state["bg_started_ts"] = time.time()
 
         # NOTE: pass job_id to the worker
         st.session_state["bg_future"] = _get_executor().submit(
@@ -499,7 +500,8 @@ if view == "Today":
                 job_id = uuid.uuid4().hex                      # NEW
                 st.session_state["bg_job_id"] = job_id         # NEW
                 _set_progress(job_id, 0, days, "starting")     # NEW seed
-            
+                st.session_state["bg_started_ts"] = time.time()
+                
                 # NOTE the extra 3rd arg: job_id
                 st.session_state["bg_future"] = _get_executor().submit(
                     _bg_run_generation, payload, filtered, job_id
