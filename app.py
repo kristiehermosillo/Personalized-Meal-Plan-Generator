@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import json
 from concurrent.futures import ThreadPoolExecutor
 import threading, uuid, time
+from streamlit_autorefresh import st_autorefresh
 
 # Thread-safe in-process progress store
 _PROGRESS = {}
@@ -362,7 +363,8 @@ if show_generate_bar:
         job_id = uuid.uuid4().hex
         st.session_state["bg_job_id"] = job_id
         _set_progress(job_id, 0, days, "starting")
-        st.session_state["bg_started_ts"] = time.time()
+        st.session_state["bg_started_ts"] = time.time()        # <— ADD THIS
+        st.session_state["spin_i"] = 0     
 
         # NOTE: pass job_id to the worker
         st.session_state["bg_future"] = _get_executor().submit(
@@ -376,31 +378,38 @@ bg_future = st.session_state.get("bg_future")
 job_id = st.session_state.get("bg_job_id")
 
 if bg_future and job_id:
-    p = _get_progress(job_id) or {"step": 0, "total": days, "note": "starting", "ts": time.time()}
-    pct = 0.0 if not p["total"] else min(1.0, p["step"] / max(1, p["total"]))
-    st.progress(pct, text=f"Day {p['step']} of {p['total']} — {p.get('note','')}")
+    # Auto-rerun the app every 1s while job is running (Community Cloud safe)
+    st_autorefresh(interval=1000, key=f"auto_refresh_{job_id}")
 
-    idle = time.time() - p["ts"]
-    if idle > 120:
-        st.warning("No update for 2+ minutes. It may be slow or stalled.")
-    else:
-        st.caption(f"Last update {int(idle)}s ago · you can keep browsing.")
+    # Friendly spinner that advances on each rerun (no server calls needed)
+    SPIN = ["🍳", "🔪", "🥣", "🧂", "⏲️", "🔥"]
+    st.session_state["spin_i"] = (st.session_state.get("spin_i", 0) + 1) % len(SPIN)
+    emoji = SPIN[st.session_state["spin_i"]]
 
-    # NEW: auto-refresh the page while the job is running
-    auto = st.toggle("Auto-refresh progress", value=True, key="bg_auto_refresh")
-    if auto and not bg_future.done():
-        time.sleep(1.2)
-        st.rerun()
+    # Show elapsed time since job started
+    started = float(st.session_state.get("bg_started_ts", time.time()))
+    elapsed = int(time.time() - started)
 
-    if st.button("🔄 Refresh status", key="bg_refresh", use_container_width=True):
-        st.rerun()
+    # Pull any progress info we may have (ok if it never changes)
+    p = _get_progress(job_id) or {"step": 0, "total": days, "note": "starting", "ts": started}
+    step = int(p.get("step", 0))
+    total = int(p.get("total", days or 1))
+    note  = str(p.get("note", ""))
 
+    # Simple status line that visibly changes every rerun
+    st.caption(f"{emoji} Cooking… {elapsed}s elapsed — Day {step} of {total} {('— ' + note) if note else ''}")
+
+    # Optional light progress bar (it will move if your callback updates 'step')
+    pct = 0.0 if total <= 0 else min(1.0, step / max(1, total))
+    st.progress(pct)
+
+    # When the future finishes, collect result and clean up
     if bg_future.done():
         try:
             result_plan = bg_future.result()
             if result_plan:
                 try:
-                    result_plan = dedupe_plan(result_plan, filtered)  # ok if this no-ops
+                    result_plan = dedupe_plan(result_plan, filtered)  # ok if you don't have this
                 except Exception:
                     pass
                 st.session_state.plan = result_plan
@@ -412,9 +421,11 @@ if bg_future and job_id:
             st.error(f"Background generation failed: {e}")
         finally:
             _clear_progress(job_id)
-            st.session_state["bg_future"] = None
+            st.session_state["bg_future"]  = None
             st.session_state["bg_payload"] = None
-            st.session_state["bg_job_id"] = None
+            st.session_state["bg_job_id"]  = None
+            st.session_state["bg_started_ts"] = None
+            st.session_state["spin_i"] = 0
             st.rerun()
 
 
