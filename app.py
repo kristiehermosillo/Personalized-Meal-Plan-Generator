@@ -124,48 +124,26 @@ st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
 # Hide the floating Streamlit profile/badge (bottom-right)
 st.markdown("""
 <style>
-/* Try all known Streamlit badge class names */
+/* Hide Streamlit Cloud viewer/creator badges (old & new) */
 [class^="viewerBadge_"], [class*=" viewerBadge_"],
-[class*="stAppViewerBadge"], [data-testid="stViewerBadge"],
-a[href*="streamlit.app"], a[href*="streamlit.io"] {
-  display: none !important;
-}
+[data-testid="stAppViewerBadge"], [data-testid="stViewerBadge"],
+[data-testid="viewerBadge"], [data-testid="creatorBadge"] { display: none !important; }
 
-/* Catch the newer bottom-right fixed badge/card container */
-div[style*="position: fixed"][style*="bottom"][style*="right"] {
-  display: none !important;
-}
+/* Hide any fixed bottom-right overlay card/badge (fallback) */
+div[style*="position: fixed"][style*="bottom"][style*="right"] { display: none !important; }
 
-/* Optional: hide other chrome if you want */
-// #MainMenu { visibility: hidden; }
-// footer { visibility: hidden; }
-// .stDeployButton { display: none !important; }
+/* If the badge is rendered in an iframe, hide that iframe too */
+iframe[title*="badge"],
+iframe[src*="viewer-badge"],
+iframe[src*="streamlit.io"],
+iframe[src*="streamlit.app"],
+iframe[src*="share.streamlit"] { display: none !important; }
+
+/* Optional: hide other chrome */
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
-import streamlit.components.v1 as components
-
-components.html("""
-<script>
-(function hideBadge(){
-  const kill = () => {
-    // look for common badge pieces and hide their outer box
-    const hits = Array.from(document.querySelectorAll('a, button, div'))
-      .filter(el => /view profile/i.test(el.textContent || ''));
-    if (hits.length) {
-      const box = hits[0].closest('div');
-      if (box) { box.style.display = 'none'; }
-    }
-    // also hide any viewerBadge* container classes
-    document.querySelectorAll('[class*="viewerBadge_"]').forEach(el => el.style.display='none');
-    // and any bottom-right fixed overlay boxes
-    document.querySelectorAll('div[style*="position: fixed"][style*="bottom"][style*="right"]')
-      .forEach(el => el.style.display='none');
-  };
-  kill();
-  setInterval(kill, 1000);
-})();
-</script>
-""", height=0)
 
 
 st.markdown("""
