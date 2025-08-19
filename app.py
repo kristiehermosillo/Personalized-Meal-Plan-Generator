@@ -120,6 +120,19 @@ except Exception:
 
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
+
+# Hide the floating Streamlit profile/badge (bottom-right)
+st.markdown("""
+<style>
+/* creator/profile badge */
+[class^="viewerBadge_"], [class*="viewerBadge_"] { display: none !important; }
+/* optional: also hide the deploy button & footer/menu if you want */
+// .stDeployButton { display: none !important; }
+// footer { visibility: hidden; }
+// #MainMenu { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown("""
 <style>
 .cook-banner{font-size:1.25rem;font-weight:700;margin:8px 0 14px;padding:12px 14px;
