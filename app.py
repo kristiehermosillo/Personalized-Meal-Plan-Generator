@@ -120,6 +120,27 @@ except Exception:
 
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
+# ---- Badge scrim: cover the bottom-right profile badge (Safari-safe) ----
+st.markdown("""
+<style>
+.badge-scrim{
+  position: fixed;
+  right: 0; 
+  bottom: 0;
+  width: 190px;   /* widen if any edge peeks out */
+  height: 90px;   /* increase if the badge is taller */
+  z-index: 999999; 
+  background: var(--background-color, #0E1117);  /* dark theme fallback */
+  border-top-left-radius: 12px;                  /* soft corner */
+}
+
+/* If user is on light theme, use white so it blends */
+@media (prefers-color-scheme: light){
+  .badge-scrim{ background: #ffffff; }
+}
+</style>
+<div class="badge-scrim"></div>
+""", unsafe_allow_html=True)
 
 # Hide the floating Streamlit profile/badge (bottom-right)
 st.markdown("""
