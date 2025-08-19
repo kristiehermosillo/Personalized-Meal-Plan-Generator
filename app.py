@@ -142,6 +142,30 @@ div[style*="position: fixed"][style*="bottom"][style*="right"] {
 // .stDeployButton { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
+import streamlit.components.v1 as components
+
+components.html("""
+<script>
+(function hideBadge(){
+  const kill = () => {
+    // look for common badge pieces and hide their outer box
+    const hits = Array.from(document.querySelectorAll('a, button, div'))
+      .filter(el => /view profile/i.test(el.textContent || ''));
+    if (hits.length) {
+      const box = hits[0].closest('div');
+      if (box) { box.style.display = 'none'; }
+    }
+    // also hide any viewerBadge* container classes
+    document.querySelectorAll('[class*="viewerBadge_"]').forEach(el => el.style.display='none');
+    // and any bottom-right fixed overlay boxes
+    document.querySelectorAll('div[style*="position: fixed"][style*="bottom"][style*="right"]')
+      .forEach(el => el.style.display='none');
+  };
+  kill();
+  setInterval(kill, 1000);
+})();
+</script>
+""", height=0)
 
 
 st.markdown("""
