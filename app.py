@@ -124,14 +124,25 @@ st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
 # Hide the floating Streamlit profile/badge (bottom-right)
 st.markdown("""
 <style>
-/* creator/profile badge */
-[class^="viewerBadge_"], [class*="viewerBadge_"] { display: none !important; }
-/* optional: also hide the deploy button & footer/menu if you want */
-// .stDeployButton { display: none !important; }
-// footer { visibility: hidden; }
+/* Try all known Streamlit badge class names */
+[class^="viewerBadge_"], [class*=" viewerBadge_"],
+[class*="stAppViewerBadge"], [data-testid="stViewerBadge"],
+a[href*="streamlit.app"], a[href*="streamlit.io"] {
+  display: none !important;
+}
+
+/* Catch the newer bottom-right fixed badge/card container */
+div[style*="position: fixed"][style*="bottom"][style*="right"] {
+  display: none !important;
+}
+
+/* Optional: hide other chrome if you want */
 // #MainMenu { visibility: hidden; }
+// footer { visibility: hidden; }
+// .stDeployButton { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
+
 
 st.markdown("""
 <style>
