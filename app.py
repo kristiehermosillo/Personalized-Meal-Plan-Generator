@@ -618,10 +618,13 @@ if view == "Today":
     
             st.markdown(btn_html, unsafe_allow_html=True)
     
-    # capture day change from URL params
-    params = st.experimental_get_query_params()
-    if "selected_day" in params:
-        st.session_state.selected_day = int(params["selected_day"][0])
+    # capture day change from URL params (new API)
+    qp_selected = st.query_params.get("selected_day")
+    if qp_selected:
+        try:
+            st.session_state.selected_day = int(qp_selected)
+        except Exception:
+            pass
     
     # use the chosen day
     day = st.session_state.selected_day
