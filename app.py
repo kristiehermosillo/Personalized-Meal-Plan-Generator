@@ -536,49 +536,43 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # --- Clean compact day selector (radio) ---
+    # --- Compact day pills (selected = primary, others = subtle) ---
     import datetime as _dt
     
-    # smaller radio “chips” styling
+    # compact pill styling (global, once)
     st.markdown("""
     <style>
-    /* shrink horizontal radio buttons */
-    [data-testid="stHorizontalBlock"] [role="radiogroup"] > label {
-      border: 1px solid #3a3a3a;
+    div.stButton > button{
       padding: 8px 12px;
+      font-size: .95rem;
+      border-radius: 12px;
       margin: 4px 6px;
-      border-radius: 10px;
-    }
-    [role="radiogroup"] input:checked + div {
-      border: 1px solid #ff9900 !important;   /* highlight selected */
-      box-shadow: 0 0 0 2px rgba(255,153,0,.15) inset;
+      line-height: 1.15;
     }
     </style>
     """, unsafe_allow_html=True)
     
     start = _dt.date.today()
-    options = list(range(1, max_day + 1))
+    cols = st.columns(min(max_day, 7))
     
-    def _fmt(i: int) -> str:
-        return f"Day {i}  {(start + _dt.timedelta(days=i-1)).strftime('%a %d')}"
+    for i in range(1, max_day + 1):
+        with cols[(i - 1) % len(cols)]:
+            # two-line, readable label
+            date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+            label = f"Day {i}\n{date_str}"
     
-    day = st.radio(
-        "Pick a day",
-        options,
-        horizontal=True,
-        index=(st.session_state.get("selected_day", 1) - 1),
-        format_func=_fmt,
-        label_visibility="collapsed",
-    )
-    st.session_state.selected_day = int(day)
+            is_selected = (i == st.session_state.selected_day)
+            btn_type = "primary" if is_selected else "secondary"
+    
+            if st.button(label, key=f"daybtn_{i}", use_container_width=True, type=btn_type):
+                st.session_state.selected_day = i
+                st.rerun()
     
     # use the chosen day
+    day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
-
-
-
-
+    
     # ---------- Meals ----------
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
     for i, r in enumerate(meals, start=1):
