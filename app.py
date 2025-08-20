@@ -589,22 +589,22 @@ meals = plan[day - 1]
 
 ICONS = ["🍳", "🥗", "🍝", "🍱"]
 
-    for i, r in enumerate(meals, start=1):
-        label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
-        if not r:
-            st.write(f"**{label}** — empty")
-            continue
-        icon = ICONS[(i - 1) % len(ICONS)]
-        kcal = int(r.get("calories") or 0)
-        serv = int(r.get("servings") or 1)
-        title = f"{icon} {label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}"
-        with st.expander(title, expanded=(i == 1)):
-            st.write("**Ingredients:**")
-            for ing in r.get("ingredients", []):
-                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
-            st.write("**Steps:**")
-            for idx, step in enumerate(r.get("steps", []), start=1):
-                st.write(f"{idx}. {step}")
+for i, r in enumerate(meals, start=1):
+    label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
+    if not r:
+        st.write(f"**{label}** — empty")
+        continue
+    icon = ICONS[(i - 1) % len(ICONS)]
+    kcal = int(r.get("calories") or 0)
+    serv = int(r.get("servings") or 1)
+    title = f"{icon} {label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}"
+    with st.expander(title, expanded=(i == 1)):
+        st.write("**Ingredients:**")
+        for ing in r.get("ingredients", []):
+            st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
+        st.write("**Steps:**")
+        for idx, step in enumerate(r.get("steps", []), start=1):
+            st.write(f"{idx}. {step}")
 
 
 elif view == "Weekly Overview":
