@@ -536,18 +536,19 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # --- Compact day buttons (pure Streamlit) ---
+    # --- Compact day tabs (pure Streamlit, no disabled grey look) ---
     import datetime as _dt
     
-    # small, tidy buttons globally (keep once)
+    # one lightweight style for all day buttons
     st.markdown("""
     <style>
     div.stButton > button{
-      padding:6px 10px;
+      padding:6px 12px;
       font-size:.92rem;
-      border-radius:8px;
-      margin:2px;
+      border-radius:10px;
+      margin:2px 4px;
     }
+    div.stButton > button:hover{ filter:brightness(1.07); }
     </style>
     """, unsafe_allow_html=True)
     
@@ -557,19 +558,28 @@ if view == "Today":
     for i in range(1, max_day + 1):
         with cols[(i - 1) % len(cols)]:
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
-            # show an orange dot on the selected day; disable it so it reads as "active"
             is_selected = (i == st.session_state.selected_day)
-            prefix = "🟠 " if is_selected else ""
-            label = f"{prefix}Day {i}  {date_str}"
     
-            if st.button(label, key=f"daybtn_{i}", use_container_width=True, disabled=is_selected):
+            # single-line label; keep it crisp
+            label = f"Day {i}  {date_str}"
+    
+            # all buttons stay clickable (no disabled grey)
+            if st.button(label, key=f"daybtn_{i}", use_container_width=True):
                 st.session_state.selected_day = i
                 st.rerun()
+    
+            # thin orange indicator for the selected tab
+            if is_selected:
+                st.markdown(
+                    "<div style='height:3px;border-radius:2px;background:#ff9900;margin-top:6px;'></div>",
+                    unsafe_allow_html=True
+                )
     
     # use the chosen day
     day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
+
 
 
     # ---------- Meals ----------
