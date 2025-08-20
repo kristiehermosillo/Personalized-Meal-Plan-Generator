@@ -549,16 +549,16 @@ if view == "Today":
         st.session_state.selected_day = 1
     
     # quick arrows
-    cprev, csp, cnext = st.columns([0.12, 0.76, 0.12])
-    with cprev:
+    col1, col2 = st.columns([0.5, 0.5])
+    with col1:
         if st.button("◀ Previous", use_container_width=True, disabled=st.session_state.selected_day <= 1):
             st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
             st.rerun()
-    with cnext:
+    with col2:
         if st.button("Next ▶", use_container_width=True, disabled=st.session_state.selected_day >= max_day):
             st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
             st.rerun()
-    
+
     # clickable tiles
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
