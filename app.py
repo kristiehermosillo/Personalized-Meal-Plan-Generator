@@ -541,47 +541,49 @@ if view == "Today":
         
     max_day = max(plan.keys())
 
-    # Horizontal day picker (no slider)
-    import datetime as _dt
+# Compact navigation + clickable day buttons
+import datetime as _dt
 
-    # keep selected day in session
-    if "selected_day" not in st.session_state:
-        st.session_state.selected_day = 1
-    
-    # quick arrows
-    col1, col2 = st.columns([0.5, 0.5])
-    with col1:
-        if st.button("◀ Previous", use_container_width=True, disabled=st.session_state.selected_day <= 1):
-            st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
-            st.rerun()
-    with col2:
-        if st.button("Next ▶", use_container_width=True, disabled=st.session_state.selected_day >= max_day):
-            st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
+# remember the selected day
+if "selected_day" not in st.session_state:
+    st.session_state.selected_day = 1
+
+# small arrows side by side on the left
+c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
+with c1:
+    prev_disabled = st.session_state.selected_day <= 1
+    if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
+        st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
+        st.rerun()
+with c2:
+    next_disabled = st.session_state.selected_day >= max_day
+    if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
+        st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
+        st.rerun()
+
+# a single row of compact day buttons
+start = _dt.date.today()
+cols = st.columns(max_day)
+for i in range(1, max_day + 1):
+    with cols[i - 1]:
+        date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+        label = f"Day {i}\n{date_str}"
+        selected = (i == st.session_state.selected_day)
+
+        # the whole tile is the button
+        if st.button(label, key=f"daybtn_{i}", use_container_width=True):
+            st.session_state.selected_day = i
             st.rerun()
 
-    # clickable tiles
-    start = _dt.date.today()
-    cols = st.columns(min(max_day, 7))
-    for i in range(1, max_day + 1):
-        idx = (i - 1) % len(cols)
-        with cols[idx]:
-            date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
-            is_sel = (i == st.session_state.selected_day)
-            is_today = (i == 1)
+        # a thin accent bar under the selected day so users see where they are
+        if selected:
             st.markdown(
-                f"""
-                <div style="padding:10px 12px;border-radius:12px;margin-bottom:4px;text-align:center">
-                  <div style="font-weight:700;">Day {i}</div>
-                  <div style="opacity:.8">{date_str}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+                "<div style='height:4px;border-radius:3px;background:#FF4B4B;margin-top:-6px;'></div>",
+                unsafe_allow_html=True
             )
-            if st.button("Open" if not is_today else "Today", key=f"daybtn_{i}", use_container_width=True):
-                st.session_state.selected_day = i
-                st.rerun()
-    
-    day = st.session_state.selected_day
+
+# use the chosen day
+day = st.session_state.selected_day
 
     
     slots = get_day_slots(meals_per_day)
