@@ -584,8 +584,8 @@ for i in range(1, max_day + 1):
 
 # use the chosen day
 day = st.session_state.selected_day
-    slots = get_day_slots(meals_per_day)
-    meals = plan.get(day, [])
+slots = get_day_slots(meals_per_day)
+meals = plan[day - 1]
 
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
 
