@@ -536,90 +536,43 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # --- Compact two-line day pills (selected = primary) ---
+    # --- Two-line day pills (content width, centered in columns) ---
     import datetime as _dt
     
-    # Mobile-friendly, two-line, centered day pills
     st.markdown("""
     <style>
-    /* Base pill look */
+    /* Center the button inside its column and keep content width */
+    div.stButton { display: flex; justify-content: center; }
+    
+    /* Pill styling */
     div.stButton > button{
-      white-space: pre-line;      /* allow \\n line breaks */
-      text-align: center;         /* center both lines */
+      white-space: pre-line;      /* enable \n line break */
+      text-align: center;
       line-height: 1.18;
-      padding: 14px 18px;
-      font-size: 1.0rem;
-      border-radius: 16px;
-      margin: 6px 8px;
-      border: none !important;    /* no outlines */
-      color: #ffffff !important;  /* readable on dark */
-      min-height: 48px;           /* finger-friendly */
-      min-width: 128px;           /* keeps pills readable */
+      padding: 12px 16px;
+      font-size: .98rem;
+      border-radius: 14px;
+      margin: 6px 8px;            /* visible gap between pills */
+      border: none !important;
+      color: #ffffff !important;
+      min-width: 128px;           /* consistent size, but NOT full column width */
     }
     
-    /* Make the FIRST line (Day X) pop */
+    /* Make the first line (Day X) pop a bit more */
     div.stButton > button::first-line{
       font-weight: 700;
-      font-size: 1.08rem;
+      font-size: 1.06rem;
     }
     
-    /* Unselected = subtle filled */
-    div.stButton > button[kind="secondary"]{
-      background: #333333 !important;
-    }
+    /* Unselected = subtle filled, Selected = accent filled */
+    div.stButton > button[kind="secondary"]{ background:#333 !important; }
+    div.stButton > button[kind="primary"]  { background:#ff4b4b !important; }
     
-    /* Selected = accent filled (tweak to taste) */
-    div.stButton > button[kind="primary"]{
-      background: #ff4b4b !important;
-    }
-    
-    /* Hover (desktop) */
-    div.stButton > button:hover{
-      filter: brightness(1.06);
-    }
-    
-    /* -------- Responsive tweaks -------- */
-    
-    /* Medium screens: slightly tighter */
-    @media (max-width: 900px){
-      div.stButton > button{
-        padding: 12px 14px;
-        font-size: 0.98rem;
-        border-radius: 14px;
-        margin: 6px 6px;
-        min-width: 118px;
-      }
-      div.stButton > button::first-line{
-        font-size: 1.04rem;
-      }
-    }
-    
-    /* Small phones: compact, still tappable */
-    @media (max-width: 540px){
-      div.stButton > button{
-        padding: 10px 12px;
-        font-size: 0.95rem;
-        border-radius: 12px;
-        margin: 4px 6px;
-        min-width: 46%;
-      }
-      div.stButton > button::first-line{
-        font-size: 1.0rem;
-      }
-    }
-    
-    /* Very small phones: one per row if needed */
-    @media (max-width: 380px){
-      div.stButton > button{
-        min-width: 100%;
-      }
-    }
+    /* Slight hover on desktop */
+    div.stButton > button:hover{ filter:brightness(1.06); }
     </style>
     """, unsafe_allow_html=True)
-
     
-    # build two-line labels like:
-    # Day 5\nSun 24
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
     
@@ -627,18 +580,19 @@ if view == "Today":
         with cols[(i - 1) % len(cols)]:
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
             label = f"Day {i}\n{date_str}"
-    
             is_selected = (i == st.session_state.selected_day)
             btn_type = "primary" if is_selected else "secondary"
     
-            if st.button(label, key=f"daybtn_{i}", use_container_width=True, type=btn_type):
+            # NOTE: no use_container_width — lets pills be content width
+            if st.button(label, key=f"daybtn_{i}", type=btn_type):
                 st.session_state.selected_day = i
                 st.rerun()
     
-    # use the chosen day
+    # chosen day
     day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
+
 
     
     # ---------- Meals ----------
