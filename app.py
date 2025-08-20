@@ -552,38 +552,81 @@ if view == "Today":
             st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
             st.rerun()
     
-    # compact button styling (ONE block only)
+    # custom CSS for day tabs
     st.markdown("""
     <style>
-    div.stButton > button{
-      padding:6px 10px;
-      font-size:.92rem;
+    .day-btn {
+      display:inline-block;
+      padding:6px 12px;
+      margin:3px;
+      font-size:.9rem;
       border-radius:8px;
-      margin:2px;
+      border:1px solid #444;
+      background:#111;
+      color:white;
+      cursor:pointer;
     }
-    div.stButton > button strong{ font-weight:700; }
-    div.stButton > button:hover{ filter:brightness(1.1); }
+    .day-btn:hover {
+      background:#222;
+    }
+    .day-btn.selected {
+      border:1px solid #ff9900;
+      background:#222;
+    }
+    .day-btn strong {
+      font-weight:700;
+    }
     </style>
     """, unsafe_allow_html=True)
     
-    # day buttons, selected gets an orange dot + bold "Day X"
+    # render as markdown links with HTML (clean, no f-strings)
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
+    
+    # compact day "tab" style (keep this once)
+    st.markdown("""
+    <style>
+    .day-btn {
+      display:inline-block;
+      padding:6px 12px;
+      margin:3px;
+      font-size:.9rem;
+      border-radius:8px;
+      border:1px solid #444;
+      background:#111;
+      color:white;
+      cursor:pointer;
+    }
+    .day-btn:hover { background:#222; }
+    .day-btn.selected { border:1px solid #ff9900; background:#222; }
+    .day-btn strong { font-weight:700; }
+    </style>
+    """, unsafe_allow_html=True)
+    
     for i in range(1, max_day + 1):
         with cols[(i - 1) % len(cols)]:
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
             is_selected = (i == st.session_state.selected_day)
-            prefix = "🟠 " if is_selected else ""
-            btn_label = f"{prefix}<strong>Day {i}</strong> {date_str}"
-            if st.button(btn_label, key=f"daybtn_{i}", use_container_width=True):
-                st.session_state.selected_day = i
-                st.rerun()
+            dot = "🟠 " if is_selected else ""
+            classes = "day-btn selected" if is_selected else "day-btn"
+    
+            btn_html = (
+                '<button class="{cls}" onclick="window.location.href=\'?selected_day={i}\';">'
+                '{dot}<strong>Day {i}</strong><br>{date}'
+                '</button>'
+            ).format(cls=classes, i=i, dot=dot, date=date_str)
+    
+            st.markdown(btn_html, unsafe_allow_html=True)
+    
+    # capture day change from URL params
+    params = st.experimental_get_query_params()
+    if "selected_day" in params:
+        st.session_state.selected_day = int(params["selected_day"][0])
     
     # use the chosen day
     day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
-
 
     # ---------- Meals ----------
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
