@@ -612,7 +612,7 @@ elif view == "Weekly Overview":
     st.subheader("🗓️ Week at a glance")
     
     if st.session_state.pop("jump_to_shop", False):
-    pass  # marker in case you later want to auto focus the tab
+        pass  # marker in case you later want to auto focus the tab
 
     # Build dataframes safely
     df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
