@@ -587,7 +587,7 @@ day = st.session_state.selected_day
 slots = get_day_slots(meals_per_day)
 meals = plan[day - 1]
 
-    ICONS = ["🍳", "🥗", "🍝", "🍱"]
+ICONS = ["🍳", "🥗", "🍝", "🍱"]
 
     for i, r in enumerate(meals, start=1):
         label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
