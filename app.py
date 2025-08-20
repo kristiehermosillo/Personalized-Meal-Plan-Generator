@@ -494,6 +494,7 @@ from recipe_db import RECIPE_DB
 if view == "Today":
     st.subheader("📅 Today’s Meals")
 
+    # Empty state (no plan yet)
     if not plan or not list(plan.keys()):
         with st.container(border=True):
             st.markdown("### Let’s make your week")
@@ -502,8 +503,6 @@ if view == "Today":
                 "2. Choose **Recipe source** (from our cookbook or create new recipes).\n"
                 "3. Click **Generate my meal plan**."
             )
-    
-            # THE single button – always background
             clicked = st.button(
                 "🍽️ Generate my meal plan",
                 type="primary",
@@ -522,90 +521,75 @@ if view == "Today":
                     cal_target=st.session_state.calorie_target if st.session_state.is_premium else None,
                     sig=sig,
                 )
-                import uuid
-                job_id = uuid.uuid4().hex                      # NEW
-                st.session_state["bg_job_id"] = job_id         # NEW
-                _set_progress(job_id, 0, days, "starting")     # NEW seed
+                job_id = uuid.uuid4().hex
+                st.session_state["bg_job_id"] = job_id
+                _set_progress(job_id, 0, days, "starting")
                 st.session_state["bg_started_ts"] = time.time()
-                
-                # NOTE the extra 3rd arg: job_id
                 st.session_state["bg_future"] = _get_executor().submit(
                     _bg_run_generation, payload, filtered, job_id
                 )
                 st.session_state["bg_payload"] = payload
                 st.info("Cooking your plan in the background… you can keep browsing.")
                 st.rerun()
-            
-                            
         st.stop()
-        
+
+    # We have a plan
     max_day = max(plan.keys())
 
-# Compact navigation + clickable day buttons
-import datetime as _dt
+    # ---------- Compact navigation + clickable day buttons ----------
+    import datetime as _dt
 
-# remember the selected day
-if "selected_day" not in st.session_state:
-    st.session_state.selected_day = 1
+    # remember the selected day
+    if "selected_day" not in st.session_state:
+        st.session_state.selected_day = 1
 
-# small arrows side by side on the left
-c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
-with c1:
-    prev_disabled = st.session_state.selected_day <= 1
-    if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
-        st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
-        st.rerun()
-with c2:
-    next_disabled = st.session_state.selected_day >= max_day
-    if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
-        st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
-        st.rerun()
-
-# a single row of compact day buttons
-start = _dt.date.today()
-cols = st.columns(max_day)
-for i in range(1, max_day + 1):
-    with cols[i - 1]:
-        date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
-        label = f"Day {i}\n{date_str}"
-        selected = (i == st.session_state.selected_day)
-
-        # the whole tile is the button
-        if st.button(label, key=f"daybtn_{i}", use_container_width=True):
-            st.session_state.selected_day = i
+    # small arrows side by side
+    c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
+    with c1:
+        prev_disabled = st.session_state.selected_day <= 1
+        if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
+            st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
+            st.rerun()
+    with c2:
+        next_disabled = st.session_state.selected_day >= max_day
+        if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
+            st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
             st.rerun()
 
-        # a thin accent bar under the selected day so users see where they are
-        if selected:
-            st.markdown(
-                "<div style='height:4px;border-radius:3px;background:#FF4B4B;margin-top:-6px;'></div>",
-                unsafe_allow_html=True
-            )
+    # one row of compact day buttons (wrap at 7 columns max)
+    start = _dt.date.today()
+    cols = st.columns(min(max_day, 7))
+    for i in range(1, max_day + 1):
+        with cols[(i - 1) % len(cols)]:
+            date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+            btn_label = f"Day {i}\n{date_str}"
+            if st.button(btn_label, key=f"daybtn_{i}", use_container_width=True):
+                st.session_state.selected_day = i
+                st.rerun()
 
-# use the chosen day
-day = st.session_state.selected_day
-slots = get_day_slots(meals_per_day)
-meals = plan[day - 1]
+    # use the chosen day
+    day = st.session_state.selected_day
+    slots = get_day_slots(meals_per_day)
+    meals = plan.get(day, [])
 
-ICONS = ["🍳", "🥗", "🍝", "🍱"]
-
-for i, r in enumerate(meals, start=1):
-    label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
-    if not r:
-        st.write(f"**{label}** — empty")
-        continue
-    icon = ICONS[(i - 1) % len(ICONS)]
-    kcal = int(r.get("calories") or 0)
-    serv = int(r.get("servings") or 1)
-    title = f"{icon} {label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}"
-    with st.expander(title, expanded=(i == 1)):
-        st.write("**Ingredients:**")
-        for ing in r.get("ingredients", []):
-            st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
-        st.write("**Steps:**")
-        for idx, step in enumerate(r.get("steps", []), start=1):
-            st.write(f"{idx}. {step}")
-
+    # ---------- Meals ----------
+    ICONS = ["🍳", "🥗", "🍝", "🍱"]
+    for i, r in enumerate(meals, start=1):
+        label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
+        if not r:
+            st.write(f"**{label}** — empty")
+            continue
+        icon = ICONS[(i - 1) % len(ICONS)]
+        kcal = int(r.get("calories") or 0)
+        serv = int(r.get("servings") or 1)
+        title = f"{icon} {label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}"
+        with st.expander(title, expanded=(i == 1)):
+            st.write("**Ingredients:**")
+            for ing in r.get("ingredients", []):
+                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
+            st.write("**Steps:**")
+            for idx, step in enumerate(r.get("steps", []), start=1):
+                st.write(f"{idx}. {step}")
 
 elif view == "Weekly Overview":
     st.subheader("🗓️ Week at a glance")
