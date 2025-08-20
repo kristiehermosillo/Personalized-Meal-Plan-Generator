@@ -322,6 +322,13 @@ import hashlib
 
 st.subheader(f"Your {days}-day plan")
 
+c_l, c_r = st.columns([0.6, 0.4])
+with c_r:
+    if st.button("🛒 Open shopping list", use_container_width=True, key="btn_jump_shop"):
+        st.session_state["jump_to_shop"] = True
+        view = "Weekly Overview"
+        st.rerun()
+
 # Friendlier wording for normal users (no “AI” language)
 if st.session_state.is_premium:
     source_choice = st.radio(
@@ -358,10 +365,11 @@ sig = make_filters_signature()
 show_generate_bar = bool(st.session_state.get("plan")) or bool(st.session_state.get("bg_future"))
 
 if show_generate_bar:
-    disabled = bool(st.session_state.get("bg_future") and not st.session_state["bg_future"].done())
-    label = "🔁 Generate a new plan" if st.session_state.get("plan") else "🍽️ Generate my meal plan"
+    busy = _job_running()
+    label = "🍳 Cooking your plan…" if busy else "🍽️ Build my plan"
 
-    if st.button(label, type="primary", use_container_width=True, key="btn_generate_top", disabled=disabled):
+
+    if st.button(label, type="primary", use_container_width=True, key="btn_generate_top", disabled=busy):
         payload = dict(
             use_ai=bool(use_ai),
             days=days,
@@ -535,31 +543,76 @@ if view == "Today":
 
     # Horizontal day picker (no slider)
     import datetime as _dt
+
+    # keep selected day in session
+    if "selected_day" not in st.session_state:
+        st.session_state.selected_day = 1
+    
+    # quick arrows
+    cprev, csp, cnext = st.columns([0.12, 0.76, 0.12])
+    with cprev:
+        if st.button("◀ Previous", use_container_width=True, disabled=st.session_state.selected_day <= 1):
+            st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
+            st.rerun()
+    with cnext:
+        if st.button("Next ▶", use_container_width=True, disabled=st.session_state.selected_day >= max_day):
+            st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
+            st.rerun()
+    
+    # clickable tiles
     start = _dt.date.today()
-    labels = [f"Day {i} ({(start + _dt.timedelta(days=i-1)).strftime('%a')})" for i in range(1, max_day + 1)]
-    day_label = st.radio("Pick a day", labels, index=0, horizontal=True)
-    day = int(day_label.split()[1])  # still returns 1..7
+    cols = st.columns(min(max_day, 7))
+    for i in range(1, max_day + 1):
+        idx = (i - 1) % len(cols)
+        with cols[idx]:
+            date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+            is_sel = (i == st.session_state.selected_day)
+            is_today = (i == 1)
+            border = "2px solid #FF4B4B" if is_sel else ("2px solid rgba(255,255,255,.35)" if is_today else "1px solid rgba(255,255,255,.18)")
+            st.markdown(
+                f"""
+                <div style="padding:10px 12px;border-radius:12px;border:{border};margin-bottom:6px;text-align:center">
+                  <div style="font-weight:700;">Day {i}</div>
+                  <div style="opacity:.8">{date_str}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button("Open" if not is_today else "Today", key=f"daybtn_{i}", use_container_width=True):
+                st.session_state.selected_day = i
+                st.rerun()
+    
+    day = st.session_state.selected_day
+
     
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
 
+    ICONS = ["🍳", "🥗", "🍝", "🍱"]
+
     for i, r in enumerate(meals, start=1):
         label = slots[i - 1] if i - 1 < len(slots) else f"Meal {i}"
         if not r:
-            st.write(f"**{label}** — (empty)")
+            st.write(f"**{label}** — empty")
             continue
+        icon = ICONS[(i - 1) % len(ICONS)]
         kcal = int(r.get("calories") or 0)
         serv = int(r.get("servings") or 1)
-        with st.expander(f"{label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}", expanded=False):
+        title = f"{icon} {label} — {r.get('name','Recipe')} · {kcal} kcal · serves {serv}"
+        with st.expander(title, expanded=(i == 1)):
             st.write("**Ingredients:**")
-            for ing in r["ingredients"]:
-                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing['item']}".strip())
+            for ing in r.get("ingredients", []):
+                st.write(f"- {ing.get('qty','')} {ing.get('unit','')} {ing.get('item','')}".strip())
             st.write("**Steps:**")
             for idx, step in enumerate(r.get("steps", []), start=1):
                 st.write(f"{idx}. {step}")
 
+
 elif view == "Weekly Overview":
     st.subheader("🗓️ Week at a glance")
+    
+    if st.session_state.pop("jump_to_shop", False):
+    pass  # marker in case you later want to auto focus the tab
 
     # Build dataframes safely
     df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
