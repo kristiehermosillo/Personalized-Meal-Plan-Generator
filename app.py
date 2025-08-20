@@ -536,54 +536,54 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # ---------- Compact navigation + clickable day buttons ----------
-    import datetime as _dt
+# --- Compact nav + clean day buttons ---
+import datetime as _dt
 
-    # remember the selected day
-    if "selected_day" not in st.session_state:
-        st.session_state.selected_day = 1
+# tiny prev/next arrows side-by-side
+c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
+with c1:
+    prev_disabled = st.session_state.selected_day <= 1
+    if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
+        st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
+        st.rerun()
+with c2:
+    next_disabled = st.session_state.selected_day >= max_day
+    if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
+        st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
+        st.rerun()
 
-    # small arrows side by side
-    c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
-    with c1:
-        prev_disabled = st.session_state.selected_day <= 1
-        if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
-            st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
+# compact button styling (ONE block only)
+st.markdown("""
+<style>
+div.stButton > button{
+  padding:6px 10px;
+  font-size:.92rem;
+  border-radius:8px;
+  margin:2px;
+}
+div.stButton > button strong{ font-weight:700; }
+div.stButton > button:hover{ filter:brightness(1.1); }
+</style>
+""", unsafe_allow_html=True)
+
+# day buttons, selected gets an orange dot + bold "Day X"
+start = _dt.date.today()
+cols = st.columns(min(max_day, 7))
+for i in range(1, max_day + 1):
+    with cols[(i - 1) % len(cols)]:
+        date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+        is_selected = (i == st.session_state.selected_day)
+        prefix = "🟠 " if is_selected else ""
+        btn_label = f"{prefix}<strong>Day {i}</strong> {date_str}"
+        if st.button(btn_label, key=f"daybtn_{i}", use_container_width=True):
+            st.session_state.selected_day = i
             st.rerun()
-    with c2:
-        next_disabled = st.session_state.selected_day >= max_day
-        if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
-            st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
-            st.rerun()
 
-    # one row of compact day buttons (styled like tabs)
-    start = _dt.date.today()
-    cols = st.columns(min(max_day, 7))
-    
-    button_css = """
-    <style>
-    div.stButton > button {
-        padding: 4px 8px;
-        font-size: 0.85rem;
-        border-radius: 6px;
-        margin: 2px;
-    }
-    </style>
-    """
-    st.markdown(button_css, unsafe_allow_html=True)
-    
-    for i in range(1, max_day + 1):
-        with cols[(i - 1) % len(cols)]:
-            date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
-            btn_label = f"Day {i} {date_str}"
-            if st.button(btn_label, key=f"daybtn_{i}"):
-                st.session_state.selected_day = i
-                st.rerun()
+# use the chosen day
+day = st.session_state.selected_day
+slots = get_day_slots(meals_per_day)
+meals = plan.get(day, [])
 
-    # use the chosen day
-    day = st.session_state.selected_day
-    slots = get_day_slots(meals_per_day)
-    meals = plan.get(day, [])
 
     # ---------- Meals ----------
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
