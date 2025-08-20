@@ -568,10 +568,9 @@ if view == "Today":
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
             is_sel = (i == st.session_state.selected_day)
             is_today = (i == 1)
-            border = "2px solid #FF4B4B" if is_sel else ("2px solid rgba(255,255,255,.35)" if is_today else "1px solid rgba(255,255,255,.18)")
             st.markdown(
                 f"""
-                <div style="padding:10px 12px;border-radius:12px;border:{border};margin-bottom:6px;text-align:center">
+                <div style="padding:10px 12px;border-radius:12px;margin-bottom:4px;text-align:center">
                   <div style="font-weight:700;">Day {i}</div>
                   <div style="opacity:.8">{date_str}</div>
                 </div>
