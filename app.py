@@ -536,100 +536,41 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # --- Compact nav + clean day buttons ---
+    # --- Compact day buttons (pure Streamlit) ---
     import datetime as _dt
     
-    # tiny prev/next arrows side-by-side
-    c1, c2, _spacer = st.columns([0.08, 0.08, 0.84])
-    with c1:
-        prev_disabled = st.session_state.selected_day <= 1
-        if st.button("◀", use_container_width=True, key="nav_prev", disabled=prev_disabled):
-            st.session_state.selected_day = max(1, st.session_state.selected_day - 1)
-            st.rerun()
-    with c2:
-        next_disabled = st.session_state.selected_day >= max_day
-        if st.button("▶", use_container_width=True, key="nav_next", disabled=next_disabled):
-            st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
-            st.rerun()
-    
-    # custom CSS for day tabs
+    # small, tidy buttons globally (keep once)
     st.markdown("""
     <style>
-    .day-btn {
-      display:inline-block;
-      padding:6px 12px;
-      margin:3px;
-      font-size:.9rem;
+    div.stButton > button{
+      padding:6px 10px;
+      font-size:.92rem;
       border-radius:8px;
-      border:1px solid #444;
-      background:#111;
-      color:white;
-      cursor:pointer;
-    }
-    .day-btn:hover {
-      background:#222;
-    }
-    .day-btn.selected {
-      border:1px solid #ff9900;
-      background:#222;
-    }
-    .day-btn strong {
-      font-weight:700;
+      margin:2px;
     }
     </style>
     """, unsafe_allow_html=True)
     
-    # render as markdown links with HTML (clean, no f-strings)
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
-    
-    # compact day "tab" style (keep this once)
-    st.markdown("""
-    <style>
-    .day-btn {
-      display:inline-block;
-      padding:6px 12px;
-      margin:3px;
-      font-size:.9rem;
-      border-radius:8px;
-      border:1px solid #444;
-      background:#111;
-      color:white;
-      cursor:pointer;
-    }
-    .day-btn:hover { background:#222; }
-    .day-btn.selected { border:1px solid #ff9900; background:#222; }
-    .day-btn strong { font-weight:700; }
-    </style>
-    """, unsafe_allow_html=True)
     
     for i in range(1, max_day + 1):
         with cols[(i - 1) % len(cols)]:
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
+            # show an orange dot on the selected day; disable it so it reads as "active"
             is_selected = (i == st.session_state.selected_day)
-            dot = "🟠 " if is_selected else ""
-            classes = "day-btn selected" if is_selected else "day-btn"
+            prefix = "🟠 " if is_selected else ""
+            label = f"{prefix}Day {i}  {date_str}"
     
-            btn_html = (
-                '<button class="{cls}" onclick="window.location.href=\'?selected_day={i}\';">'
-                '{dot}<strong>Day {i}</strong><br>{date}'
-                '</button>'
-            ).format(cls=classes, i=i, dot=dot, date=date_str)
-    
-            st.markdown(btn_html, unsafe_allow_html=True)
-    
-    # capture day change from URL params (new API)
-    qp_selected = st.query_params.get("selected_day")
-    if qp_selected:
-        try:
-            st.session_state.selected_day = int(qp_selected)
-        except Exception:
-            pass
+            if st.button(label, key=f"daybtn_{i}", use_container_width=True, disabled=is_selected):
+                st.session_state.selected_day = i
+                st.rerun()
     
     # use the chosen day
     day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
+
 
     # ---------- Meals ----------
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
