@@ -556,14 +556,27 @@ if view == "Today":
             st.session_state.selected_day = min(max_day, st.session_state.selected_day + 1)
             st.rerun()
 
-    # one row of compact day buttons (wrap at 7 columns max)
+    # one row of compact day buttons (styled like tabs)
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
+    
+    button_css = """
+    <style>
+    div.stButton > button {
+        padding: 4px 8px;
+        font-size: 0.85rem;
+        border-radius: 6px;
+        margin: 2px;
+    }
+    </style>
+    """
+    st.markdown(button_css, unsafe_allow_html=True)
+    
     for i in range(1, max_day + 1):
         with cols[(i - 1) % len(cols)]:
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
-            btn_label = f"Day {i}\n{date_str}"
-            if st.button(btn_label, key=f"daybtn_{i}", use_container_width=True):
+            btn_label = f"Day {i} {date_str}"
+            if st.button(btn_label, key=f"daybtn_{i}"):
                 st.session_state.selected_day = i
                 st.rerun()
 
