@@ -6,6 +6,20 @@ from concurrent.futures import ThreadPoolExecutor
 import threading, uuid, time
 from streamlit_autorefresh import st_autorefresh
 
+# ---- flags and helpers (paste near the top, after imports) ----
+HIDE_BADGE = os.getenv("HIDE_BADGE", "0").lower() in ("1", "true", "yes")
+
+# no-op dedupe if not defined elsewhere
+try:
+    dedupe_plan  # type: ignore
+except NameError:
+    def dedupe_plan(plan, filtered_recipes):
+        return plan
+
+def _job_running():
+    f = st.session_state.get("bg_future")
+    return bool(f and not f.done())
+
 # Thread-safe in-process progress store
 _PROGRESS = {}
 _PROGRESS_LOCK = threading.Lock()
@@ -120,62 +134,6 @@ except Exception:
 
 load_dotenv()
 st.set_page_config(page_title=APP_NAME, page_icon="🥗", layout="wide")
-# ---- Badge scrim: cover the bottom-right profile badge (Safari-safe) ----
-st.markdown("""
-<style>
-.badge-scrim{
-  position: fixed;
-  right: 0; 
-  bottom: 0;
-  width: 190px;   /* widen if any edge peeks out */
-  height: 90px;   /* increase if the badge is taller */
-  z-index: 999999; 
-  background: var(--background-color, #0E1117);  /* dark theme fallback */
-  border-top-left-radius: 12px;                  /* soft corner */
-}
-
-/* If user is on light theme, use white so it blends */
-@media (prefers-color-scheme: light){
-  .badge-scrim{ background: #ffffff; }
-}
-</style>
-<div class="badge-scrim"></div>
-""", unsafe_allow_html=True)
-
-# Hide the floating Streamlit profile/badge (bottom-right)
-st.markdown("""
-<style>
-/* Hide Streamlit Cloud viewer/creator badges (old & new) */
-[class^="viewerBadge_"], [class*=" viewerBadge_"],
-[data-testid="stAppViewerBadge"], [data-testid="stViewerBadge"],
-[data-testid="viewerBadge"], [data-testid="creatorBadge"] { display: none !important; }
-
-/* Hide any fixed bottom-right overlay card/badge (fallback) */
-div[style*="position: fixed"][style*="bottom"][style*="right"] { display: none !important; }
-
-/* If the badge is rendered in an iframe, hide that iframe too */
-iframe[title*="badge"],
-iframe[src*="viewer-badge"],
-iframe[src*="streamlit.io"],
-iframe[src*="streamlit.app"],
-iframe[src*="share.streamlit"] { display: none !important; }
-
-/* Optional: hide other chrome */
-[data-testid="stToolbar"] { display: none !important; }
-[data-testid="stDecoration"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
-
-
-st.markdown("""
-<style>
-.cook-banner{font-size:1.25rem;font-weight:700;margin:8px 0 14px;padding:12px 14px;
-  border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.05);
-  display:flex;gap:.6rem;align-items:center}
-.cook-emoji{font-size:1.6rem;line-height:1}
-.cook-faint{opacity:.75;font-weight:500}
-</style>
-""", unsafe_allow_html=True)
 
 # --- sanity check: is the OpenRouter key visible? (don’t print the key) ---
 if st.session_state.get("use_ai_toggle", False):  # only show when AI toggle is on
@@ -184,9 +142,8 @@ if st.session_state.get("use_ai_toggle", False):  # only show when AI toggle is 
 
 # --- Warm the backend so it wakes up before we need it ---
 try:
-    requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=8)
+    requests.get(f"{DEFAULT_BACKEND_URL}/health", timeout=3)
 except Exception:
-    # it's fine if this fails; verification has its own retries
     pass
 
 # ---- Session bootstrap ----
