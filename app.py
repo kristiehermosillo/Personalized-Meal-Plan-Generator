@@ -536,28 +536,44 @@ if view == "Today":
     # We have a plan
     max_day = max(plan.keys())
 
-    # --- Compact day pills (selected = primary, others = subtle) ---
+    # --- Compact two-line day pills (selected = primary) ---
     import datetime as _dt
     
-    # compact pill styling (global, once)
+    # Once-per-page: solid filled pills + centered two-line text
     st.markdown("""
     <style>
     div.stButton > button{
-      padding: 8px 12px;
+      /* make pills compact and two-line */
+      white-space: pre-line;     /* allow \n line breaks */
+      text-align: center;        /* center both lines */
+      line-height: 1.2;
+      padding: 12px 16px;
       font-size: .95rem;
-      border-radius: 12px;
+      border-radius: 14px;
       margin: 4px 6px;
-      line-height: 1.15;
+      border: none !important;   /* remove outlines */
+      color: #ffffff !important; /* readable on dark */
+    }
+    
+    /* unselected = subtle filled pill */
+    div.stButton > button[kind="secondary"]{
+      background: #2f2f2f !important;
+    }
+    
+    /* selected = primary filled pill (Streamlit accent by default) */
+    div.stButton > button[kind="primary"]{
+      background: #ff4b4b !important;  /* tweak if you want a different accent */
     }
     </style>
     """, unsafe_allow_html=True)
     
+    # build two-line labels like:
+    # Day 5\nSun 24
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
     
     for i in range(1, max_day + 1):
         with cols[(i - 1) % len(cols)]:
-            # two-line, readable label
             date_str = (start + _dt.timedelta(days=i - 1)).strftime("%a %d")
             label = f"Day {i}\n{date_str}"
     
@@ -572,6 +588,7 @@ if view == "Today":
     day = st.session_state.selected_day
     slots = get_day_slots(meals_per_day)
     meals = plan.get(day, [])
+
     
     # ---------- Meals ----------
     ICONS = ["🍳", "🥗", "🍝", "🍱"]
