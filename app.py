@@ -539,33 +539,84 @@ if view == "Today":
     # --- Compact two-line day pills (selected = primary) ---
     import datetime as _dt
     
-    # Once-per-page: solid filled pills + centered two-line text
+    # Mobile-friendly, two-line, centered day pills
     st.markdown("""
     <style>
+    /* Base pill look */
     div.stButton > button{
-      /* make pills compact and two-line */
-      white-space: pre-line;     /* allow \n line breaks */
-      text-align: center;        /* center both lines */
-      line-height: 1.2;
-      padding: 12px 16px;
-      font-size: .95rem;
-      border-radius: 14px;
-      margin: 4px 6px;
-      border: none !important;   /* remove outlines */
-      color: #ffffff !important; /* readable on dark */
+      white-space: pre-line;      /* allow \\n line breaks */
+      text-align: center;         /* center both lines */
+      line-height: 1.18;
+      padding: 14px 18px;
+      font-size: 1.0rem;
+      border-radius: 16px;
+      margin: 6px 8px;
+      border: none !important;    /* no outlines */
+      color: #ffffff !important;  /* readable on dark */
+      min-height: 48px;           /* finger-friendly */
+      min-width: 128px;           /* keeps pills readable */
     }
     
-    /* unselected = subtle filled pill */
+    /* Make the FIRST line (Day X) pop */
+    div.stButton > button::first-line{
+      font-weight: 700;
+      font-size: 1.08rem;
+    }
+    
+    /* Unselected = subtle filled */
     div.stButton > button[kind="secondary"]{
-      background: #2f2f2f !important;
+      background: #333333 !important;
     }
     
-    /* selected = primary filled pill (Streamlit accent by default) */
+    /* Selected = accent filled (tweak to taste) */
     div.stButton > button[kind="primary"]{
-      background: #ff4b4b !important;  /* tweak if you want a different accent */
+      background: #ff4b4b !important;
+    }
+    
+    /* Hover (desktop) */
+    div.stButton > button:hover{
+      filter: brightness(1.06);
+    }
+    
+    /* -------- Responsive tweaks -------- */
+    
+    /* Medium screens: slightly tighter */
+    @media (max-width: 900px){
+      div.stButton > button{
+        padding: 12px 14px;
+        font-size: 0.98rem;
+        border-radius: 14px;
+        margin: 6px 6px;
+        min-width: 118px;
+      }
+      div.stButton > button::first-line{
+        font-size: 1.04rem;
+      }
+    }
+    
+    /* Small phones: compact, still tappable */
+    @media (max-width: 540px){
+      div.stButton > button{
+        padding: 10px 12px;
+        font-size: 0.95rem;
+        border-radius: 12px;
+        margin: 4px 6px;
+        min-width: 46%;
+      }
+      div.stButton > button::first-line{
+        font-size: 1.0rem;
+      }
+    }
+    
+    /* Very small phones: one per row if needed */
+    @media (max-width: 380px){
+      div.stButton > button{
+        min-width: 100%;
+      }
     }
     </style>
     """, unsafe_allow_html=True)
+
     
     # build two-line labels like:
     # Day 5\nSun 24
