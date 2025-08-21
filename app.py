@@ -750,11 +750,11 @@ elif view == "Weekly Overview":
         _meal_note(int(r["Day"]), str(r["Recipe"])) for _, r in plan_display.iterrows()
     ]
 
-    # Tabs for a cleaner layout
-    if jump:
-    tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
-    else:
-        tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
+        # Tabs for a cleaner layout
+        if jump:
+        tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
+        else:
+            tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
 
     with tab_plan:
         st.dataframe(
