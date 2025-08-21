@@ -552,37 +552,52 @@ if view == "Today":
 
     st.markdown("""
     <style>
-    /* Center the button inside its column and keep content width */
+    /* Center each pill inside its column */
     div.stButton { display: flex; justify-content: center; }
     
-    /* Pill styling */
+    /* Pill base */
     div.stButton > button{
-      white-space: pre-line;      /* enable \n line break */
+      white-space: pre-line;        /* allow \n break: 'Day 1\\nWed 20' */
       text-align: center;
-      line-height: 1.18;
+      line-height: 1.2;
       padding: 12px 16px;
-      font-size: .98rem;
-      border-radius: 14px;
-      margin: 6px 8px;            /* visible gap between pills */
+      font-size: .96rem;
+      border-radius: 18px;
+      margin: 8px 14px;             /* BIGGER gap so pills don’t “touch” */
       border: none !important;
-      color: #ffffff !important;
-      min-width: 128px;           /* consistent size, but NOT full column width */
+      color: rgba(255,255,255,.88) !important;  /* slightly softer second line */
+      min-width: 130px;             /* content width, not full column */
+      box-shadow: 0 0 0 1px rgba(255,255,255,.06),
+                  0 4px 10px rgba(0,0,0,.25);   /* subtle separation */
     }
     
-    /* Make the first line (Day X) pop a bit more */
+    /* Make the first line (Day X) pop */
     div.stButton > button::first-line{
       font-weight: 700;
       font-size: 1.06rem;
+      color: #fff;
     }
     
-    /* Unselected = subtle filled, Selected = accent filled */
-    div.stButton > button[kind="secondary"]{ background:#333 !important; }
-    div.stButton > button[kind="primary"]  { background:#ff4b4b !important; }
+    /* Unselected vs selected */
+    div.stButton > button[kind="secondary"]{
+      background: #343434 !important;   /* subtle filled */
+    }
+    div.stButton > button[kind="primary"]{
+      background: #ff4b4b !important;   /* accent filled */
+      box-shadow: 0 0 0 1px rgba(255,255,255,.12),
+                  0 6px 14px rgba(255,75,75,.25);
+    }
     
-    /* Slight hover on desktop */
-    div.stButton > button:hover{ filter:brightness(1.06); }
+    /* Phone tweaks: wrap to 2-up, then 1-up */
+    @media (max-width: 560px){
+      div.stButton > button{ min-width: 46%; margin: 6px 6px; }
+    }
+    @media (max-width: 380px){
+      div.stButton > button{ min-width: 100%; }
+    }
     </style>
     """, unsafe_allow_html=True)
+
     
     start = _dt.date.today()
     cols = st.columns(min(max_day, 7))
