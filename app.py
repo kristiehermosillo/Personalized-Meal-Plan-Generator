@@ -538,7 +538,18 @@ if view == "Today":
 
     # --- Two-line day pills (content width, centered in columns) ---
     import datetime as _dt
+    # ---- Selected day bootstrap (MUST come before the day pills) ----
+    if "selected_day" not in st.session_state:
+        st.session_state.selected_day = 1
     
+    # make sure it's inside 1..max_day (e.g., after a new plan is generated)
+    try:
+        st.session_state.selected_day = int(
+            max(1, min(max_day, st.session_state.selected_day))
+        )
+    except Exception:
+        st.session_state.selected_day = 1
+
     st.markdown("""
     <style>
     /* Center the button inside its column and keep content width */
