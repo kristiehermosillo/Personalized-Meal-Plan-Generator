@@ -225,12 +225,10 @@ st.divider()
 
 # ---- Sidebar: TOP controls ----
 st.sidebar.markdown("### Navigation")
-view = st.sidebar.radio(
-    "Go to",
-    ["Today", "Weekly Overview", "Recipes"],
-    index=0,
-    horizontal=False,
-)
+NAV_OPTS = ["Today", "Weekly Overview", "Recipes"]
+st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")     # stateful radio
+view = st.session_state.get("nav_view", NAV_OPTS[0])    # current page
+
 
 st.sidebar.markdown("### Plan controls")
 st.session_state.plan_locked = st.sidebar.checkbox(
@@ -325,8 +323,8 @@ st.subheader(f"Your {days}-day plan")
 c_l, c_r = st.columns([0.6, 0.4])
 with c_r:
     if st.button("🛒 Open shopping list", use_container_width=True, key="btn_jump_shop"):
-        st.session_state["jump_to_shop"] = True
-        view = "Weekly Overview"
+        st.session_state["jump_to_shop"] = True                   # tell Weekly view to focus the list
+        st.session_state["nav_view"] = "Weekly Overview"          # switch sidebar radio (changes page)
         st.rerun()
 
 # Friendlier wording for normal users (no “AI” language)
@@ -642,9 +640,8 @@ if view == "Today":
 
 elif view == "Weekly Overview":
     st.subheader("🗓️ Week at a glance")
-    
-    if st.session_state.pop("jump_to_shop", False):
-        pass  # marker in case you later want to auto focus the tab
+
+    jump = st.session_state.pop("jump_to_shop", False)
 
     # Build dataframes safely
     df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
@@ -754,7 +751,10 @@ elif view == "Weekly Overview":
     ]
 
     # Tabs for a cleaner layout
-    tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
+    if jump:
+    tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
+    else:
+        tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
 
     with tab_plan:
         st.dataframe(
