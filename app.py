@@ -486,9 +486,6 @@ df_plan = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
 st.markdown("---")
 plan = st.session_state.plan
 
-from common import get_day_slots, plan_to_dataframe, consolidate_shopping_list
-from recipe_db import RECIPE_DB
-
 if view == "Today":
     st.subheader("📅 Today’s Meals")
 
@@ -641,7 +638,9 @@ if view == "Today":
 elif view == "Weekly Overview":
     st.subheader("🗓️ Week at a glance")
 
-    jump = st.session_state.pop("jump_to_shop", False)
+    # If the gray 'Open shopping list' button was clicked on the Home section,
+    # this flag will exist just for this rerun. Use it once, then forget it.
+    jump = bool(st.session_state.pop("jump_to_shop", False))
 
     # Build dataframes safely
     df_plan2 = plan_to_dataframe(plan, meals_per_day) if plan else pd.DataFrame()
@@ -656,7 +655,9 @@ elif view == "Weekly Overview":
     # Pantry matching
     pantry_items = parse_pantry_text(st.session_state.get("pantry_text", ""))
     annotate = st.session_state.get("show_pantry_note", False)
-    need_df, have_df = split_shopping_by_pantry(df_shop2, pantry_items, annotate_at_bottom=annotate)
+    need_df, have_df = split_shopping_by_pantry(
+        df_shop2, pantry_items, annotate_at_bottom=annotate
+    )
 
     # ---------- Compliance summary (per day) ----------
     def _short_kcal(n: int) -> str:
@@ -701,7 +702,9 @@ elif view == "Weekly Overview":
         if restrict_tokens:
             bits.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
 
-        pill_html.append(f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(bits) + "</b></div>")
+        pill_html.append(
+            f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(bits) + "</b></div>"
+        )
 
     st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
     st.markdown(
@@ -750,9 +753,10 @@ elif view == "Weekly Overview":
         _meal_note(int(r["Day"]), str(r["Recipe"])) for _, r in plan_display.iterrows()
     ]
 
-    # Tabs for a cleaner layout
+    # Tabs for a cleaner layout — if "Open shopping list" sent us here,
+    # show that tab first. Otherwise default to Plan table first.
     if jump:
-    tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
+        tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
     else:
         tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
 
@@ -772,6 +776,127 @@ elif view == "Weekly Overview":
                 "Notes":       st.column_config.TextColumn(width="large"),
             },
         )
+
+    with tab_shop:
+        left, right = st.columns([0.65, 0.35])
+
+        # --- RIGHT column (controls) ---
+        with right:
+            new_hh = st.number_input(
+                "People you’re cooking for",
+                min_value=1, max_value=12, step=1, value=hh_size,
+                help="Rescales quantities in the shopping list only."
+            )
+            if new_hh != hh_size:
+                st.session_state["household_size"] = int(new_hh)
+                hh_size = int(new_hh)
+                df_shop2 = consolidate_shopping_list(plan, household_size=hh_size)
+                need_df, have_df = split_shopping_by_pantry(
+                    df_shop2, pantry_items, annotate_at_bottom=annotate
+                )
+
+            st.caption("Pantry matching")
+            if pantry_items:
+                st.write(f"Matched against: {', '.join(pantry_items)}")
+            else:
+                st.write("No pantry items entered.")
+
+        # --- LEFT column (interactive checklist) ---
+        with left:
+            shop_display = need_df.copy() if annotate else need_df
+            if annotate and not need_df.empty:
+                norm_have = {i.lower() for i in have_df["item"].astype(str)} if not have_df.empty else set()
+                shop_display["item"] = shop_display["item"].astype(str).apply(
+                    lambda x: f"{x} (have)" if x.lower() in norm_have else x
+                )
+
+            if shop_display is None or shop_display.empty:
+                st.info("Your shopping list is empty.")
+            else:
+                st.markdown("### 🛒 Shopping Checklist")
+
+                # keep checkbox state stable across reruns
+                signature = "|".join(shop_display["item"].astype(str).tolist())
+                if "shop_checked" not in st.session_state or st.session_state.get("shop_keys_sig") != signature:
+                    st.session_state.shop_checked = {i: False for i in range(len(shop_display))}
+                    st.session_state.shop_keys_sig = signature
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Mark all"):
+                        for i in st.session_state.shop_checked:
+                            st.session_state.shop_checked[i] = True
+                        st.rerun()
+                with c2:
+                    if st.button("Clear all"):
+                        for i in st.session_state.shop_checked:
+                            st.session_state.shop_checked[i] = False
+                        st.rerun()
+
+                for idx, row in shop_display.reset_index(drop=True).iterrows():
+                    label = f'{row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
+                    st.session_state.shop_checked[idx] = st.checkbox(
+                        label,
+                        value=st.session_state.shop_checked.get(idx, False),
+                        key=f"chk_{idx}"
+                    )
+
+                # Copy-friendly text + download as .txt (good for Notes)
+                text_lines = [
+                    f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
+                    for _, row in shop_display.iterrows()
+                ]
+                note_text = "Shopping List\n" + "\n".join(text_lines)
+
+                st.markdown("#### 📋 Copy to your Notes app")
+                st.text_area("Copy this list:", value=note_text, height=160, label_visibility="collapsed")
+                st.download_button(
+                    "Save as Note (.txt)",
+                    data=note_text.encode("utf-8"),
+                    file_name="Shopping List.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+
+            # Pantry matches (unchanged)
+            with st.expander("Pantry items (matched)"):
+                have_display = have_df.rename(
+                    columns={"item": "Item", "quantity": "Quantity", "unit": "Unit"}
+                )
+                if have_display.empty:
+                    st.write("No matches.")
+                else:
+                    st.dataframe(
+                        have_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Item":     st.column_config.TextColumn(width="large"),
+                            "Quantity": st.column_config.NumberColumn(format="%.2f", width="small"),
+                            "Unit":     st.column_config.TextColumn(width="small"),
+                        },
+                    )
+
+    with tab_totals:
+        day_summary = (
+            plan_display.groupby("Day")[["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]]
+            .sum()
+            .reset_index()
+            .sort_values("Day")
+        )
+        st.dataframe(
+            day_summary,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Day":         st.column_config.NumberColumn(format="%d", width="small"),
+                "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
+                "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
+                "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
+                "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
+            },
+        )
+
 
     with tab_shop:
         left, right = st.columns([0.65, 0.35])
