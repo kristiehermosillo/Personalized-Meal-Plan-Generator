@@ -882,51 +882,97 @@ elif view == "Weekly Overview":
                 import json
                 
                 _html(f"""
-                <div style="display:flex;gap:8px;align-items:center;margin:8px 0 12px;">
-                  <button id="copyBtn"
-                    style="padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);
-                           background:#2b2b2b;color:#fff;cursor:pointer;">
-                    📋 Copy to clipboard
-                  </button>
-                  <span id="copyMsg" style="opacity:.8;"></span>
+                <style>
+                  .copy-wrap {{
+                    display:flex; align-items:center; gap:10px; margin:8px 0 12px;
+                    position: relative;
+                  }}
+                  .copy-btn {{
+                    padding:10px 14px; border-radius:10px;
+                    border:1px solid rgba(255,255,255,.15);
+                    background:#2b2b2b; color:#fff; cursor:pointer;
+                    font-weight:600;
+                    box-shadow:0 2px 8px rgba(0,0,0,.25);
+                    transition:filter .15s ease, transform .06s ease;
+                  }}
+                  .copy-btn:hover {{ filter:brightness(1.08); }}
+                  .copy-btn:active {{ transform:translateY(1px); }}
+                
+                  .copy-toast {{
+                    position:absolute; left:170px;  /* sits just right of the button */
+                    padding:8px 12px; border-radius:10px;
+                    background:linear-gradient(90deg,#22c55e,#16a34a);  /* green */
+                    color:#0b1a0f; font-weight:700; letter-spacing:.2px;
+                    box-shadow:0 6px 18px rgba(0,0,0,.35);
+                    opacity:0; transform:translateY(6px) scale(.98);
+                    transition:opacity .18s ease, transform .18s ease;
+                    pointer-events:none;  /* ignore clicks */
+                  }}
+                  .copy-toast.show {{ opacity:1; transform:translateY(0) scale(1); }}
+                  @media (max-width: 560px) {{
+                    .copy-toast {{ left:0; top:48px; }}  /* drop below on narrow screens */
+                  }}
+                </style>
+                
+                <div class="copy-wrap">
+                  <button id="copyBtn" class="copy-btn">📋 Copy to clipboard</button>
+                  <div id="copyToast" class="copy-toast" role="status" aria-live="polite">✅ Copied!</div>
                 </div>
+                
                 <script>
                   (function() {{
                     const txt = {json.dumps(note_text)};
                     const btn = document.getElementById('copyBtn');
-                    const msg = document.getElementById('copyMsg');
+                    const toast = document.getElementById('copyToast');
+                
+                    function showToast(text, ok=true) {{
+                      toast.textContent = (ok ? "✅ " : "⚠️ ") + text;
+                      toast.style.background = ok
+                        ? "linear-gradient(90deg,#22c55e,#16a34a)"
+                        : "linear-gradient(90deg,#ef4444,#dc2626)";
+                      toast.classList.add('show');
+                      setTimeout(() => toast.classList.remove('show'), 1800);
+                    }}
                 
                     async function copyNow() {{
+                      const fallbackCopy = (t) => {{
+                        const ta = document.createElement('textarea');
+                        ta.value = t;
+                        ta.style.position='fixed'; ta.style.left='-9999px'; ta.style.top='-9999px';
+                        document.body.appendChild(ta); ta.focus(); ta.select();
+                        let ok = false;
+                        try {{ ok = document.execCommand('copy'); }} catch(e) {{}}
+                        document.body.removeChild(ta);
+                        return ok;
+                      }};
+                
                       try {{
                         if (navigator.clipboard && window.isSecureContext) {{
                           await navigator.clipboard.writeText(txt);
+                          showToast("Copied!", true);
                         }} else {{
-                          // Fallback: temporary textarea
-                          const ta = document.createElement('textarea');
-                          ta.value = txt;
-                          ta.style.position='fixed';
-                          ta.style.left='-9999px';
-                          ta.style.top='-9999px';
-                          document.body.appendChild(ta);
-                          ta.focus(); ta.select();
-                          document.execCommand('copy');
-                          document.body.removeChild(ta);
+                          const ok = fallbackCopy(txt);
+                          showToast(ok ? "Copied!" : "Press Ctrl/Cmd+C to copy", ok);
+                          if (!ok) {{
+                            const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
+                            if (ta) {{ ta.focus(); ta.select(); }}
+                          }}
                         }}
-                        msg.textContent = 'Copied!';
-                        setTimeout(() => msg.textContent = '', 2000);
                       }} catch (e) {{
-                        // As a last resort, focus/select the visible textarea so the user can Cmd/Ctrl+C
-                        const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
-                        if (ta) {{ ta.focus(); ta.select(); }}
-                        msg.textContent = 'Press Ctrl/Cmd+C to copy';
-                        setTimeout(() => msg.textContent = '', 3000);
+                        const ok = fallbackCopy(txt);
+                        showToast(ok ? "Copied!" : "Press Ctrl/Cmd+C to copy", ok);
+                        if (!ok) {{
+                          const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
+                          if (ta) {{ ta.focus(); ta.select(); }}
+                        }}
                       }}
                     }}
                 
                     btn.addEventListener('click', copyNow);
                   }})();
                 </script>
-                """, height=50, scrolling=False)
+                """, height=80, scrolling=False)
+
                 
             # Pantry matches (unchanged)
             with st.expander("Pantry items (matched)"):
