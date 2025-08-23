@@ -874,42 +874,59 @@ elif view == "Weekly Overview":
                     value=note_text,
                     height=160,
                     label_visibility="collapsed",
-                    key="shop_copy_text",      # unique key to avoid duplicate-ID errors
+                    key="shop_copy_text",  # unique key
                 )
                 
-                # ONE button: copy to clipboard (robust + fallback)
+                # Render a self-contained "Copy to clipboard" button (no Streamlit event required)
                 from streamlit.components.v1 import html as _html
                 import json
                 
-                if st.button("📋 Copy to clipboard", use_container_width=True, key="shop_copy_btn"):
-                    _html(f"""
-                        <script>
-                        (function() {{
-                          const txt = {json.dumps(note_text)};
-                          function fallbackCopy(t) {{
-                            const ta = document.createElement('textarea');
-                            ta.value = t;
-                            ta.style.position = 'fixed';
-                            ta.style.left = '-9999px';
-                            document.body.appendChild(ta);
-                            ta.focus(); ta.select();
-                            try {{ document.execCommand('copy'); }} catch (e) {{}}
-                            document.body.removeChild(ta);
-                          }}
-                          try {{
-                            if (navigator.clipboard && window.isSecureContext) {{
-                              navigator.clipboard.writeText(txt).catch(() => fallbackCopy(txt));
-                            }} else {{
-                              fallbackCopy(txt);
-                            }}
-                          }} catch (e) {{
-                            fallbackCopy(txt);
-                          }}
-                        }})();
-                        </script>
-                    """, height=0)
-                    st.toast("Copied to clipboard ✅", icon="✅")
-
+                _html(f"""
+                <div style="display:flex;gap:8px;align-items:center;margin:8px 0 12px;">
+                  <button id="copyBtn"
+                    style="padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);
+                           background:#2b2b2b;color:#fff;cursor:pointer;">
+                    📋 Copy to clipboard
+                  </button>
+                  <span id="copyMsg" style="opacity:.8;"></span>
+                </div>
+                <script>
+                  (function() {{
+                    const txt = {json.dumps(note_text)};
+                    const btn = document.getElementById('copyBtn');
+                    const msg = document.getElementById('copyMsg');
+                
+                    async function copyNow() {{
+                      try {{
+                        if (navigator.clipboard && window.isSecureContext) {{
+                          await navigator.clipboard.writeText(txt);
+                        }} else {{
+                          // Fallback: temporary textarea
+                          const ta = document.createElement('textarea');
+                          ta.value = txt;
+                          ta.style.position='fixed';
+                          ta.style.left='-9999px';
+                          ta.style.top='-9999px';
+                          document.body.appendChild(ta);
+                          ta.focus(); ta.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(ta);
+                        }}
+                        msg.textContent = 'Copied!';
+                        setTimeout(() => msg.textContent = '', 2000);
+                      }} catch (e) {{
+                        // As a last resort, focus/select the visible textarea so the user can Cmd/Ctrl+C
+                        const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
+                        if (ta) {{ ta.focus(); ta.select(); }}
+                        msg.textContent = 'Press Ctrl/Cmd+C to copy';
+                        setTimeout(() => msg.textContent = '', 3000);
+                      }}
+                    }}
+                
+                    btn.addEventListener('click', copyNow);
+                  }})();
+                </script>
+                """, height=50, scrolling=False)
                 
             # Pantry matches (unchanged)
             with st.expander("Pantry items (matched)"):
