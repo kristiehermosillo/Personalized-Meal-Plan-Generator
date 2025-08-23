@@ -869,36 +869,47 @@ elif view == "Weekly Overview":
                 note_text = "Shopping List\n" + "\n".join(text_lines)
                 
                 st.markdown("#### 📋 Copy to your Notes app")
-                st.text_area("Copy this list:", value=note_text, height=160,
-                             label_visibility="collapsed", key="shop_copy_text")
+                st.text_area(
+                    "Copy this list:",
+                    value=note_text,
+                    height=160,
+                    label_visibility="collapsed",
+                    key="shop_copy_text",      # unique key to avoid duplicate-ID errors
+                )
                 
-                # ONE button: copy to clipboard
+                # ONE button: copy to clipboard (robust + fallback)
                 from streamlit.components.v1 import html as _html
                 import json
                 
                 if st.button("📋 Copy to clipboard", use_container_width=True, key="shop_copy_btn"):
                     _html(f"""
                         <script>
+                        (function() {{
                           const txt = {json.dumps(note_text)};
-                          navigator.clipboard.writeText(txt).then(() => {{
-                            // success: Streamlit toast will show
-                          }}).catch(() => {{
-                            // fallback: select the textarea so the user can Cmd/Ctrl+C
-                            const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
-                            if (ta) {{ ta.focus(); ta.select(); }}
-                          }});
+                          function fallbackCopy(t) {{
+                            const ta = document.createElement('textarea');
+                            ta.value = t;
+                            ta.style.position = 'fixed';
+                            ta.style.left = '-9999px';
+                            document.body.appendChild(ta);
+                            ta.focus(); ta.select();
+                            try {{ document.execCommand('copy'); }} catch (e) {{}}
+                            document.body.removeChild(ta);
+                          }}
+                          try {{
+                            if (navigator.clipboard && window.isSecureContext) {{
+                              navigator.clipboard.writeText(txt).catch(() => fallbackCopy(txt));
+                            }} else {{
+                              fallbackCopy(txt);
+                            }}
+                          }} catch (e) {{
+                            fallbackCopy(txt);
+                          }}
+                        }})();
                         </script>
                     """, height=0)
                     st.toast("Copied to clipboard ✅", icon="✅")
-                
-                st.download_button(
-                    "Save as Note (.txt)",
-                    data=note_text.encode("utf-8"),
-                    file_name="Shopping List.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                    key="shop_download_txt"
-                )
+
                 
             # Pantry matches (unchanged)
             with st.expander("Pantry items (matched)"):
