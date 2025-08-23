@@ -861,21 +861,35 @@ elif view == "Weekly Overview":
                         key=cb_key
                     )
 
-                # Copy-friendly text + download as .txt (good for Notes)
+                # --- Copy-friendly text + copy button ---
                 text_lines = [
                     f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
                     for _, row in shop_display.iterrows()
                 ]
                 note_text = "Shopping List\n" + "\n".join(text_lines)
-
+                
                 st.markdown("#### 📋 Copy to your Notes app")
-                st.text_area(
-                    "Copy this list:",
-                    value=note_text,
-                    height=160,
-                    label_visibility="collapsed",
-                    key="shop_copy_text"
-                )
+                st.text_area("Copy this list:", value=note_text, height=160,
+                             label_visibility="collapsed", key="shop_copy_text")
+                
+                # ONE button: copy to clipboard
+                from streamlit.components.v1 import html as _html
+                import json
+                
+                if st.button("📋 Copy to clipboard", use_container_width=True, key="shop_copy_btn"):
+                    _html(f"""
+                        <script>
+                          const txt = {json.dumps(note_text)};
+                          navigator.clipboard.writeText(txt).then(() => {{
+                            // success: Streamlit toast will show
+                          }}).catch(() => {{
+                            // fallback: select the textarea so the user can Cmd/Ctrl+C
+                            const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
+                            if (ta) {{ ta.focus(); ta.select(); }}
+                          }});
+                        </script>
+                    """, height=0)
+                    st.toast("Copied to clipboard ✅", icon="✅")
                 
                 st.download_button(
                     "Save as Note (.txt)",
