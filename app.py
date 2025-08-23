@@ -881,17 +881,16 @@ elif view == "Weekly Overview":
                 from streamlit.components.v1 import html as _html
                 import json
                 
-                _html(f"""
-                <style>
-                  .copy-wrap {
-                    display:flex; align-items:center; gap:10px; margin:8px 0 12px;
-                    position: relative; /* keep this so the toast can anchor to the button */
-                  }
+                js_txt = json.dumps(note_text)  # what you want to copy
                 
-                  /* Toast sits to the right of the button */
-                  .copy-toast {
+                _html("""
+                <style>
+                  .copy-wrap {{ display:flex; align-items:center; gap:10px; margin:8px 0 12px; position:relative; }}
+                
+                  /* Toast to the RIGHT of the button */
+                  .copy-toast {{
                     position:absolute;
-                    left: calc(100% + 12px);   /* just to the right of the button */
+                    left: calc(100% + 12px);
                     top: 50%;
                     transform: translateY(-50%) translateX(6px) scale(.98);
                     z-index: 1000;
@@ -900,86 +899,54 @@ elif view == "Weekly Overview":
                     background:linear-gradient(90deg,#22c55e,#16a34a);
                     color:#0b1a0f; font-weight:700; letter-spacing:.2px;
                     box-shadow:0 6px 18px rgba(0,0,0,.35);
-                    opacity:0;
-                    transition:opacity .18s ease, transform .18s ease;
+                    opacity:0; transition:opacity .18s ease, transform .18s ease;
                     pointer-events:none;
-                  }
-                  .copy-toast.show {
-                    opacity:1;
-                    transform: translateY(-50%) translateX(0) scale(1);
-                  }
+                  }}
+                  .copy-toast.show {{ opacity:1; transform: translateY(-50%) translateX(0) scale(1); }}
                 
-                  /* On narrow screens, drop it below the button so it doesn't overflow */
-                  @media (max-width: 560px){
-                    .copy-toast {
+                  /* On phones, drop it below the button */
+                  @media (max-width: 560px){{
+                    .copy-toast {{
                       left: 0; top: 48px;
                       transform: translateY(6px) scale(.98);
-                    }
-                    .copy-toast.show {
-                      transform: translateY(0) scale(1);
-                    }
-                  }
+                    }}
+                    .copy-toast.show {{ transform: translateY(0) scale(1); }}
+                  }}
                 </style>
-
-                
-                <div class="copy-wrap">
-                  <button id="copyBtn" class="copy-btn">📋 Copy to clipboard</button>
-                  <div id="copyToast" class="copy-toast" role="status" aria-live="polite">✅ Copied!</div>
-                </div>
                 
                 <script>
-                  (function() {{
-                    const txt = {json.dumps(note_text)};
-                    const btn = document.getElementById('copyBtn');
-                    const toast = document.getElementById('copyToast');
-                
-                    function showToast(text, ok=true) {{
-                      toast.textContent = (ok ? "✅ " : "⚠️ ") + text;
-                      toast.style.background = ok
-                        ? "linear-gradient(90deg,#22c55e,#16a34a)"
-                        : "linear-gradient(90deg,#ef4444,#dc2626)";
-                      toast.classList.add('show');
-                      setTimeout(() => toast.classList.remove('show'), 1800);
+                  (function(){{
+                    const txt = {txt};
+                    function fallbackCopy(t) {{
+                      const ta = document.createElement('textarea');
+                      ta.value = t;
+                      ta.style.position = 'fixed';
+                      ta.style.left = '-9999px';
+                      document.body.appendChild(ta);
+                      ta.focus(); ta.select();
+                      try {{ document.execCommand('copy'); }} catch (e) {{}}
+                      document.body.removeChild(ta);
                     }}
-                
-                    async function copyNow() {{
-                      const fallbackCopy = (t) => {{
-                        const ta = document.createElement('textarea');
-                        ta.value = t;
-                        ta.style.position='fixed'; ta.style.left='-9999px'; ta.style.top='-9999px';
-                        document.body.appendChild(ta); ta.focus(); ta.select();
-                        let ok = false;
-                        try {{ ok = document.execCommand('copy'); }} catch(e) {{}}
-                        document.body.removeChild(ta);
-                        return ok;
-                      }};
-                
-                      try {{
-                        if (navigator.clipboard && window.isSecureContext) {{
-                          await navigator.clipboard.writeText(txt);
-                          showToast("Copied!", true);
-                        }} else {{
-                          const ok = fallbackCopy(txt);
-                          showToast(ok ? "Copied!" : "Press Ctrl/Cmd+C to copy", ok);
-                          if (!ok) {{
-                            const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
-                            if (ta) {{ ta.focus(); ta.select(); }}
-                          }}
-                        }}
-                      }} catch (e) {{
-                        const ok = fallbackCopy(txt);
-                        showToast(ok ? "Copied!" : "Press Ctrl/Cmd+C to copy", ok);
-                        if (!ok) {{
-                          const ta = window.parent.document.querySelector('textarea[aria-label="Copy this list:"]');
-                          if (ta) {{ ta.focus(); ta.select(); }}
-                        }}
+                    try {{
+                      if (navigator.clipboard && window.isSecureContext) {{
+                        navigator.clipboard.writeText(txt).catch(() => fallbackCopy(txt));
+                      }} else {{
+                        fallbackCopy(txt);
                       }}
+                    }} catch (e) {{
+                      fallbackCopy(txt);
                     }}
-                
-                    btn.addEventListener('click', copyNow);
+                    const toast = document.getElementById('copy_toast');
+                    if (toast) {{
+                      toast.classList.add('show');
+                      setTimeout(() => toast.classList.remove('show'), 1400);
+                    }}
                   }})();
                 </script>
-                """, height=80, scrolling=False)
+                
+                <!-- This element renders right after your Streamlit button; absolute-positioned relative to this spot -->
+                <div class="copy-wrap"><div id="copy_toast" class="copy-toast">Copied!</div></div>
+                """.format(txt=js_txt), height=0)
 
                 
             # Pantry matches (unchanged)
