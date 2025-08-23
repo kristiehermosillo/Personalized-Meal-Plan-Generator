@@ -846,12 +846,19 @@ elif view == "Weekly Overview":
                             st.session_state.shop_checked[i] = False
                         st.rerun()
 
+                import hashlib  # at top of file already imported; safe to reuse here
+
+                # make a short, stable hash of the current list signature (you already set shop_keys_sig above)
+                sig = str(st.session_state.get("shop_keys_sig", ""))
+                sig_hash = hashlib.sha1(sig.encode("utf-8")).hexdigest()[:8] if sig else "nosig"
+                
                 for idx, row in shop_display.reset_index(drop=True).iterrows():
                     label = f'{row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
+                    cb_key = f"shop_chk_{sig_hash}_{idx}"   # unique across the whole app
                     st.session_state.shop_checked[idx] = st.checkbox(
                         label,
                         value=st.session_state.shop_checked.get(idx, False),
-                        key=f"chk_{idx}"
+                        key=cb_key
                     )
 
                 # Copy-friendly text + download as .txt (good for Notes)
