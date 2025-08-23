@@ -883,36 +883,44 @@ elif view == "Weekly Overview":
                 
                 _html(f"""
                 <style>
-                  .copy-wrap {{
+                  .copy-wrap {
                     display:flex; align-items:center; gap:10px; margin:8px 0 12px;
-                    position: relative;
-                  }}
-                  .copy-btn {{
-                    padding:10px 14px; border-radius:10px;
-                    border:1px solid rgba(255,255,255,.15);
-                    background:#2b2b2b; color:#fff; cursor:pointer;
-                    font-weight:600;
-                    box-shadow:0 2px 8px rgba(0,0,0,.25);
-                    transition:filter .15s ease, transform .06s ease;
-                  }}
-                  .copy-btn:hover {{ filter:brightness(1.08); }}
-                  .copy-btn:active {{ transform:translateY(1px); }}
+                    position: relative; /* keep this so the toast can anchor to the button */
+                  }
                 
-                  .copy-toast {{
-                    position:absolute; left:170px;  /* sits just right of the button */
+                  /* Toast sits to the right of the button */
+                  .copy-toast {
+                    position:absolute;
+                    left: calc(100% + 12px);   /* just to the right of the button */
+                    top: 50%;
+                    transform: translateY(-50%) translateX(6px) scale(.98);
+                    z-index: 1000;
+                    white-space: nowrap;
                     padding:8px 12px; border-radius:10px;
-                    background:linear-gradient(90deg,#22c55e,#16a34a);  /* green */
+                    background:linear-gradient(90deg,#22c55e,#16a34a);
                     color:#0b1a0f; font-weight:700; letter-spacing:.2px;
                     box-shadow:0 6px 18px rgba(0,0,0,.35);
-                    opacity:0; transform:translateY(6px) scale(.98);
+                    opacity:0;
                     transition:opacity .18s ease, transform .18s ease;
-                    pointer-events:none;  /* ignore clicks */
-                  }}
-                  .copy-toast.show {{ opacity:1; transform:translateY(0) scale(1); }}
-                  @media (max-width: 560px) {{
-                    .copy-toast {{ left:0; top:48px; }}  /* drop below on narrow screens */
-                  }}
+                    pointer-events:none;
+                  }
+                  .copy-toast.show {
+                    opacity:1;
+                    transform: translateY(-50%) translateX(0) scale(1);
+                  }
+                
+                  /* On narrow screens, drop it below the button so it doesn't overflow */
+                  @media (max-width: 560px){
+                    .copy-toast {
+                      left: 0; top: 48px;
+                      transform: translateY(6px) scale(.98);
+                    }
+                    .copy-toast.show {
+                      transform: translateY(0) scale(1);
+                    }
+                  }
                 </style>
+
                 
                 <div class="copy-wrap">
                   <button id="copyBtn" class="copy-btn">📋 Copy to clipboard</button>
