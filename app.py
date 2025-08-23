@@ -277,6 +277,7 @@ st.session_state.household_size = int(st.sidebar.number_input(
     max_value=12,
     value=int(st.session_state.get("household_size", 1)),
     step=1,
+    key="sidebar_household_size",            # <-- added
     help="Used to scale the shopping list"
 ))
 
@@ -796,6 +797,7 @@ elif view == "Weekly Overview":
             new_hh = st.number_input(
                 "People you’re cooking for",
                 min_value=1, max_value=12, step=1, value=hh_size,
+                key="shop_people",                        # <-- added
                 help="Rescales quantities in the shopping list only."
             )
             if new_hh != hh_size:
