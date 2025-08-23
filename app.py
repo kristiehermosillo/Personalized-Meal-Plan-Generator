@@ -836,12 +836,12 @@ elif view == "Weekly Overview":
 
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("Mark all"):
+                    if st.button("Mark all", key="shop_mark_all"):
                         for i in st.session_state.shop_checked:
                             st.session_state.shop_checked[i] = True
                         st.rerun()
                 with c2:
-                    if st.button("Clear all"):
+                    if st.button("Clear all", key="shop_clear_all"):
                         for i in st.session_state.shop_checked:
                             st.session_state.shop_checked[i] = False
                         st.rerun()
@@ -862,15 +862,23 @@ elif view == "Weekly Overview":
                 note_text = "Shopping List\n" + "\n".join(text_lines)
 
                 st.markdown("#### 📋 Copy to your Notes app")
-                st.text_area("Copy this list:", value=note_text, height=160, label_visibility="collapsed")
+                st.text_area(
+                    "Copy this list:",
+                    value=note_text,
+                    height=160,
+                    label_visibility="collapsed",
+                    key="shop_copy_text"
+                )
+                
                 st.download_button(
                     "Save as Note (.txt)",
                     data=note_text.encode("utf-8"),
                     file_name="Shopping List.txt",
                     mime="text/plain",
                     use_container_width=True,
+                    key="shop_download_txt"
                 )
-
+                
             # Pantry matches (unchanged)
             with st.expander("Pantry items (matched)"):
                 have_display = have_df.rename(
