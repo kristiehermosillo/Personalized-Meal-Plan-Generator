@@ -226,8 +226,18 @@ st.divider()
 # ---- Sidebar: TOP controls ----
 st.sidebar.markdown("### Navigation")
 NAV_OPTS = ["Today", "Weekly Overview", "Recipes"]
-st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")     # stateful radio
-view = st.session_state.get("nav_view", NAV_OPTS[0])    # current page
+
+# Initialize once
+if "nav_view" not in st.session_state:
+    st.session_state["nav_view"] = NAV_OPTS[0]
+
+# Redirect hook from the previous run (must happen BEFORE the radio is created)
+if st.session_state.pop("_pending_nav_to_weekly", False):
+    st.session_state["nav_view"] = "Weekly Overview"
+
+# Create the radio (binds to the same key)
+view = st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")
+
 
 
 st.sidebar.markdown("### Plan controls")
@@ -323,8 +333,9 @@ st.subheader(f"Your {days}-day plan")
 c_l, c_r = st.columns([0.6, 0.4])
 with c_r:
     if st.button("🛒 Open shopping list", use_container_width=True, key="btn_jump_shop"):
-        st.session_state["jump_to_shop"] = True                   # tell Weekly view to focus the list
-        st.session_state["nav_view"] = "Weekly Overview"          # switch sidebar radio (changes page)
+        # Next run: switch page before the radio is created, and focus the list tab
+        st.session_state["jump_to_shop"] = True
+        st.session_state["_pending_nav_to_weekly"] = True
         st.rerun()
 
 # Friendlier wording for normal users (no “AI” language)
@@ -753,12 +764,12 @@ elif view == "Weekly Overview":
         _meal_note(int(r["Day"]), str(r["Recipe"])) for _, r in plan_display.iterrows()
     ]
 
-    # Tabs for a cleaner layout — if "Open shopping list" sent us here,
-    # show that tab first. Otherwise default to Plan table first.
+    # Tabs for a cleaner layout
     if jump:
         tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
     else:
         tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
+
 
     with tab_plan:
         st.dataframe(
