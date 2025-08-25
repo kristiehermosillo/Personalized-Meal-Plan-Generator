@@ -674,26 +674,31 @@ elif view == "Weekly Overview":
         df_shop2, pantry_items, annotate_at_bottom=annotate
     )
 
-    # ---------- Compliance summary (per day) ----------
+    # ---------- Compact summary (per day) ----------
     def _short_kcal(n: int) -> str:
         return f"{n/1000:.1f}k" if n >= 1000 else str(n)
-
+    
     TOL_PCT = 10  # ±10%
     target = int(st.session_state.get("calorie_target", 0)) if st.session_state.is_premium else None
     restrict_tokens = set(normalize_tokens(allergies) + normalize_tokens(exclusions))
-
+    
     by_day = {d: df_plan2[df_plan2["day"] == d] for d in range(1, days + 1)}
-    pill_html = []
+    chips = []
     for d in range(1, days + 1):
         sub = by_day.get(d, pd.DataFrame())
         kcal = int(sub["calories"].sum()) if not sub.empty else 0
-
+    
         # calorie compliance
         cal_ok = True
+        delta_txt = ""
         if target:
             tol = int(round(target * TOL_PCT / 100))
-            cal_ok = abs(kcal - target) <= tol
-
+            delta = kcal - target
+            cal_ok = abs(delta) <= tol
+            if not cal_ok:
+                sign = "+" if delta > 0 else ""
+                delta_txt = f" ({sign}{delta})"  # only show delta when outside tolerance
+    
         # ingredient conflicts
         conflicts = 0
         if not sub.empty and restrict_tokens:
@@ -704,39 +709,58 @@ elif view == "Weekly Overview":
                         if any(tok and tok in ings for tok in restrict_tokens):
                             conflicts += 1
                         break
-
+    
         status = "ok" if (cal_ok and conflicts == 0) else ("warn" if conflicts == 0 else "bad")
-        label  = "✅" if status == "ok" else ("⚠️" if status == "warn" else "❌")
-
-        bits = []
-        if target:
-            bits.append(f"{_short_kcal(kcal)} kcal")
-            if not cal_ok:
-                delta = kcal - target
-                bits.append(f"({('+' if delta>0 else '')}{delta})")
-        if restrict_tokens:
+        bits = [f"Day {d}"]
+        bits.append(f"{_short_kcal(kcal)} kcal{delta_txt}")
+        if conflicts:
             bits.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
-
-        pill_html.append(
-            f"<div class='pill {status}'><span>Day {d}</span><b>{label} " + " ".join(bits) + "</b></div>"
-        )
-
+    
+        chips.append((status, " • ".join(bits)))
+    
     st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
+    
+    chip_html = []
+    for status, text in chips:
+        chip_html.append(f"<span class='chip {status}'><i class='dot'></i>{text}</span>")
+    
     st.markdown(
         """
         <style>
-          .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
-          .pill{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03)}
-          .pill.ok{border-color:rgba(46,204,113,.35);background:rgba(46,204,113,.08)}
-          .pill.warn{border-color:rgba(241,196,15,.35);background:rgba(241,196,15,.08)}
-          .pill.bad{border-color:rgba(231,76,60,.35);background:rgba(231,76,60,.08)}
-          .pill span{opacity:.75;margin-right:8px}
-          .pill b{font-weight:600}
+          .chiprow{
+            display:flex; flex-wrap:wrap; gap:10px; margin:8px 0 14px;
+          }
+          .chip{
+            display:inline-flex; align-items:center; gap:8px;
+            padding:6px 10px; border-radius:999px;
+            font-size:.95rem; line-height:1.1;
+            border:1px solid rgba(255,255,255,.14);
+            background:rgba(255,255,255,.04);
+          }
+          .chip .dot{
+            width:8px; height:8px; border-radius:50%;
+            display:inline-block; background:#8e8e8e;
+          }
+          .chip.ok{
+            border-color:rgba(46,204,113,.35);
+            background:rgba(46,204,113,.09);
+          }
+          .chip.ok .dot{ background:#2ecc71; }
+          .chip.warn{
+            border-color:rgba(241,196,15,.35);
+            background:rgba(241,196,15,.10);
+          }
+          .chip.warn .dot{ background:#f1c40f; }
+          .chip.bad{
+            border-color:rgba(231,76,60,.35);
+            background:rgba(231,76,60,.10);
+          }
+          .chip.bad .dot{ background:#e74c3c; }
         </style>
-        <div class="pillrow">""" + "".join(pill_html) + "</div>",
-        unsafe_allow_html=True
+        <div class="chiprow">""" + "".join(chip_html) + "</div>",
+        unsafe_allow_html=True,
     )
-    # ---------- end Compliance summary ----------
+    # ---------- end Compact summary ----------
 
     # Friendlier column names
     plan_display = df_plan2.rename(columns={
