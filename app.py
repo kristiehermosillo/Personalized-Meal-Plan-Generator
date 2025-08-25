@@ -222,12 +222,9 @@ with right:
                 if url: st.markdown(f"[Click to open Stripe Checkout]({url})")
     st.write("")  # spacer
     # Always-visible "Open shopping list" button in header
-    if st.button("🛒 Open shopping list", key="btn_jump_shop_hdr", use_container_width=True,
-                 disabled=False):
-        # set a one-shot flag to open Weekly Overview + focus Shopping list
+    if st.button("🛒 Open shopping list", key="btn_jump_shop_hdr", use_container_width=True):
         st.session_state["jump_to_shop"] = True
-        # also override navigation on the next run
-        st.session_state["_nav_override"] = "Weekly Overview"
+        st.session_state["_pending_nav_to_weekly"] = True   # one-shot redirect
         st.rerun()
 
 st.divider()
@@ -236,25 +233,15 @@ st.divider()
 st.sidebar.markdown("### Navigation")
 NAV_OPTS = ["Today", "Weekly Overview", "Recipes"]
 
-# Initialize once
-if "nav_view" not in st.session_state:
-    st.session_state["nav_view"] = NAV_OPTS[0]
-
-# Redirect hook from the previous run (must happen BEFORE the radio is created)
+# One-time redirect (must run BEFORE the radio)
 if st.session_state.pop("_pending_nav_to_weekly", False):
     st.session_state["nav_view"] = "Weekly Overview"
 
-# Create the radio (binds to the same key)
-st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")
+# Default once
+st.session_state.setdefault("nav_view", NAV_OPTS[0])
 
-# Honor one-shot override set by the header button
-nav_override = st.session_state.pop("_nav_override", None)
-if nav_override and nav_override in NAV_OPTS:
-    st.session_state["nav_view"] = nav_override
-    st.rerun()  # refresh so the radio visibly switches pages
-
-# Current view (use after the override check)
-view = st.session_state.get("nav_view", NAV_OPTS[0])
+# The radio controls the page and stores in the same key
+view = st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")
 
 st.sidebar.markdown("### Plan controls")
 st.session_state.plan_locked = st.sidebar.checkbox(
@@ -878,7 +865,7 @@ elif view == "Weekly Overview":
                         key=cb_key
                     )
 
-                # --- Copy-friendly text (preview) + Copy/Share (no download) ---
+                # --- Copy-friendly text + Copy/Share buttons (no download) ---
                 text_lines = [
                     f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
                     for _, row in shop_display.iterrows()
@@ -887,7 +874,11 @@ elif view == "Weekly Overview":
                 
                 st.markdown("#### 📋 Copy to your Notes app")
                 
-                # use a unique key so Streamlit never collides if this re-renders
+                # Use a stable, unique key so Streamlit never collides
+                import hashlib as _hash
+                sig = str(st.session_state.get("shop_keys_sig", ""))
+                sig_hash = _hash.sha1(sig.encode("utf-8")).hexdigest()[:8] if sig else "nosig"
+                
                 st.text_area(
                     "Copy this list:",
                     value=note_text,
@@ -896,75 +887,49 @@ elif view == "Weekly Overview":
                     key=f"shop_copy_text_{sig_hash}",
                 )
                 
-                # Visible Copy + Share buttons (Share opens the native share sheet on iOS/Android when available)
+                # Visible Copy + Share buttons (no f-string -> no brace issues)
                 from streamlit.components.v1 import html as stc_html
                 import json as _json
-                _payload = _json.dumps(note_text)  # safe JSON string of the text we want to copy/share
+                _js_payload = _json.dumps(note_text)
                 
-                stc_html("""
+                _html_block = """
                 <div class="copy-share" style="display:flex;align-items:center;gap:10px;margin:8px 0 12px;">
-                  <button id="copy_btn"
-                    style="padding:8px 12px;border-radius:8px;cursor:pointer;
-                           border:1px solid rgba(255,255,255,.15);
-                           background:#2b2b2b;color:inherit;">
-                    📋 Copy
-                  </button>
-                  <button id="share_btn"
-                    style="padding:8px 12px;border-radius:8px;cursor:pointer;
-                           border:1px solid rgba(255,255,255,.15);
-                           background:#2b2b2b;color:inherit;">
-                    📤 Share…
-                  </button>
-                  <span id="copy_msg" style="opacity:0;transition:opacity .2s;margin-left:6px;">Copied!</span>
+                  <button id="copy_btn" style="padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.15);background:#2b2b2b;color:inherit;">📋 Copy</button>
+                  <button id="share_btn" style="padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.15);background:#2b2b2b;color:inherit;">📤 Share…</button>
+                  <span id="copy_msg" style="opacity:0;transition:opacity .2s;">Copied!</span>
                 </div>
                 <script>
                 (function(){
-                  const txt = """ + _payload + """;
-                
+                  const txt = __PAYLOAD__;
                   function showToast(){
                     const el = document.getElementById('copy_msg');
-                    if(!el) return;
-                    el.style.opacity = 1;
-                    setTimeout(()=>el.style.opacity = 0, 1200);
+                    if(!el) return; el.style.opacity = 1; setTimeout(()=>el.style.opacity = 0, 1200);
                   }
-                
                   function fallbackCopy(t){
                     const ta = document.createElement('textarea');
-                    ta.value = t;
-                    ta.style.position = 'fixed';
-                    ta.style.left = '-9999px';
-                    document.body.appendChild(ta);
-                    ta.focus(); ta.select();
-                    try { document.execCommand('copy'); } catch(e) {}
-                    document.body.removeChild(ta);
-                    showToast();
+                    ta.value = t; ta.style.position='fixed'; ta.style.left='-9999px';
+                    document.body.appendChild(ta); ta.focus(); ta.select();
+                    try{ document.execCommand('copy'); }catch(e){}
+                    document.body.removeChild(ta); showToast();
                   }
-                
                   function copy(){
-                    if (navigator.clipboard && window.isSecureContext) {
+                    if(navigator.clipboard && window.isSecureContext){
                       navigator.clipboard.writeText(txt).then(showToast).catch(()=>fallbackCopy(txt));
-                    } else {
-                      fallbackCopy(txt);
-                    }
+                    } else { fallbackCopy(txt); }
                   }
-                
                   const copyBtn = document.getElementById('copy_btn');
                   const shareBtn = document.getElementById('share_btn');
-                
-                  if (copyBtn) copyBtn.addEventListener('click', copy);
-                
-                  if (shareBtn) shareBtn.addEventListener('click', async () => {
-                    if (navigator.share) {
-                      try {
-                        await navigator.share({ text: txt, title: "Shopping List" });
-                      } catch(e) { /* user cancelled; ignore */ }
-                    } else {
-                      copy();
-                    }
+                  if(copyBtn) copyBtn.addEventListener('click', copy);
+                  if(shareBtn) shareBtn.addEventListener('click', async ()=>{
+                    if(navigator.share){
+                      try{ await navigator.share({ text: txt, title: "Shopping List" }); }catch(e){}
+                    } else { copy(); }
                   });
                 })();
                 </script>
-                """, height=60)
+                """
+                stc_html(_html_block.replace("__PAYLOAD__", _js_payload), height=60)
+
                 
 
                 
