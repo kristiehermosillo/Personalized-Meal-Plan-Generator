@@ -820,8 +820,13 @@ elif view == "Weekly Overview":
         ref = max(1, max(r["mins"] for r in day_prep))
         for r in day_prep:
             pct = int(round(100 * r["mins"] / ref))
-            label = "🟢 light" if r["load"] == "light" else ("🔴 heavy" if r["load"] == "heavy" else "🟡 me
-
+            if r["load"] == "light":
+                label = "🟢 light"
+            elif r["load"] == "heavy":
+                label = "🔴 heavy"
+            else:
+                label = "🟡 medium"
+            
 
     # Friendlier column names
     plan_display = df_plan2.rename(columns={
