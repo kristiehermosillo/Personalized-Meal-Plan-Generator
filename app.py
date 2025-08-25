@@ -785,12 +785,9 @@ elif view == "Weekly Overview":
     if jump:
         tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
     else:
-        # Tabs for a cleaner layout
-        if jump:
-            tab_shop, tab_plan, tab_totals = st.tabs(["Shopping list", "Plan table", "Daily totals"])
-        else:
-            tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
-        
+        tab_plan, tab_shop, tab_totals = st.tabs(["Plan table", "Shopping list", "Daily totals"])
+    
+            
 
     with tab_plan:
         st.dataframe(
@@ -881,7 +878,7 @@ elif view == "Weekly Overview":
                         key=cb_key
                     )
 
-                # --- Copy-friendly text (preview) + Copy/Share buttons (no download) ---
+                # --- Copy-friendly text (preview) + Copy/Share (no download) ---
                 text_lines = [
                     f'- {row["item"]} — {row["quantity"]} {row["unit"]}'.strip()
                     for _, row in shop_display.iterrows()
@@ -889,12 +886,14 @@ elif view == "Weekly Overview":
                 note_text = "Shopping List\n" + "\n".join(text_lines)
                 
                 st.markdown("#### 📋 Copy to your Notes app")
+                
+                # use a unique key so Streamlit never collides if this re-renders
                 st.text_area(
                     "Copy this list:",
                     value=note_text,
                     height=160,
                     label_visibility="collapsed",
-                    key="shop_copy_text",
+                    key=f"shop_copy_text_{sig_hash}",
                 )
                 
                 # Visible Copy + Share buttons (Share opens the native share sheet on iOS/Android when available)
@@ -916,7 +915,7 @@ elif view == "Weekly Overview":
                            background:#2b2b2b;color:inherit;">
                     📤 Share…
                   </button>
-                  <span id="copy_msg" style="opacity:0;transition:opacity .2s;">Copied!</span>
+                  <span id="copy_msg" style="opacity:0;transition:opacity .2s;margin-left:6px;">Copied!</span>
                 </div>
                 <script>
                 (function(){{
@@ -960,29 +959,12 @@ elif view == "Weekly Overview":
                         await navigator.share({{ text: txt, title: "Shopping List" }});
                       }} catch(e) {{ /* user cancelled; ignore */ }}
                     }} else {{
-                      // If share isn't supported (desktop), just copy instead
                       copy();
                     }}
                   }});
-                }})();
+                })();
                 </script>
                 """, height=60)
-
-                
-                # Keep the textarea for preview / manual edits
-                st.text_area(
-                    "Copy this list:", value=note_text, height=160,
-                    label_visibility="collapsed", key="shop_copy_text"
-                )
-                
-                # Keep the download as well
-                st.download_button(
-                    "Save as Note (.txt)",
-                    data=note_text.encode("utf-8"),
-                    file_name="Shopping List.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
 
                 
             # Pantry matches (unchanged)
