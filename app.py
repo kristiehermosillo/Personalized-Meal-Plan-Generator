@@ -899,9 +899,9 @@ elif view == "Weekly Overview":
                 # Visible Copy + Share buttons (Share opens the native share sheet on iOS/Android when available)
                 from streamlit.components.v1 import html as stc_html
                 import json as _json
-                _payload = _json.dumps(note_text)
+                _payload = _json.dumps(note_text)  # safe JSON string of the text we want to copy/share
                 
-                stc_html(f"""
+                stc_html("""
                 <div class="copy-share" style="display:flex;align-items:center;gap:10px;margin:8px 0 12px;">
                   <button id="copy_btn"
                     style="padding:8px 12px;border-radius:8px;cursor:pointer;
@@ -918,53 +918,54 @@ elif view == "Weekly Overview":
                   <span id="copy_msg" style="opacity:0;transition:opacity .2s;margin-left:6px;">Copied!</span>
                 </div>
                 <script>
-                (function(){{
-                  const txt = {_payload};
+                (function(){
+                  const txt = """ + _payload + """;
                 
-                  function showToast(){{
+                  function showToast(){
                     const el = document.getElementById('copy_msg');
                     if(!el) return;
                     el.style.opacity = 1;
                     setTimeout(()=>el.style.opacity = 0, 1200);
-                  }}
+                  }
                 
-                  function fallbackCopy(t){{
+                  function fallbackCopy(t){
                     const ta = document.createElement('textarea');
                     ta.value = t;
                     ta.style.position = 'fixed';
                     ta.style.left = '-9999px';
                     document.body.appendChild(ta);
                     ta.focus(); ta.select();
-                    try {{ document.execCommand('copy'); }} catch(e) {{}}
+                    try { document.execCommand('copy'); } catch(e) {}
                     document.body.removeChild(ta);
                     showToast();
-                  }}
+                  }
                 
-                  function copy(){{
-                    if (navigator.clipboard && window.isSecureContext) {{
+                  function copy(){
+                    if (navigator.clipboard && window.isSecureContext) {
                       navigator.clipboard.writeText(txt).then(showToast).catch(()=>fallbackCopy(txt));
-                    }} else {{
+                    } else {
                       fallbackCopy(txt);
-                    }}
-                  }}
+                    }
+                  }
                 
                   const copyBtn = document.getElementById('copy_btn');
                   const shareBtn = document.getElementById('share_btn');
                 
                   if (copyBtn) copyBtn.addEventListener('click', copy);
                 
-                  if (shareBtn) shareBtn.addEventListener('click', async () => {{
-                    if (navigator.share) {{
-                      try {{
-                        await navigator.share({{ text: txt, title: "Shopping List" }});
-                      }} catch(e) {{ /* user cancelled; ignore */ }}
-                    }} else {{
+                  if (shareBtn) shareBtn.addEventListener('click', async () => {
+                    if (navigator.share) {
+                      try {
+                        await navigator.share({ text: txt, title: "Shopping List" });
+                      } catch(e) { /* user cancelled; ignore */ }
+                    } else {
                       copy();
-                    }}
-                  }});
+                    }
+                  });
                 })();
                 </script>
                 """, height=60)
+                
 
                 
             # Pantry matches (unchanged)
