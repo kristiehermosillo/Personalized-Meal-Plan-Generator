@@ -220,6 +220,15 @@ with right:
                         if tries == 2: st.error(f"Failed to create checkout session: {e}"); break
                         time.sleep(3)
                 if url: st.markdown(f"[Click to open Stripe Checkout]({url})")
+    st.write("")  # spacer
+    # Always-visible "Open shopping list" button in header
+    if st.button("🛒 Open shopping list", key="btn_jump_shop_hdr", use_container_width=True,
+                 disabled=False):
+        # set a one-shot flag to open Weekly Overview + focus Shopping list
+        st.session_state["jump_to_shop"] = True
+        # also override navigation on the next run
+        st.session_state["_nav_override"] = "Weekly Overview"
+        st.rerun()
 
 st.divider()
 
@@ -236,9 +245,16 @@ if st.session_state.pop("_pending_nav_to_weekly", False):
     st.session_state["nav_view"] = "Weekly Overview"
 
 # Create the radio (binds to the same key)
-view = st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")
+st.sidebar.radio("Go to", NAV_OPTS, key="nav_view")
 
+# Honor one-shot override set by the header button
+nav_override = st.session_state.pop("_nav_override", None)
+if nav_override and nav_override in NAV_OPTS:
+    st.session_state["nav_view"] = nav_override
+    st.rerun()  # refresh so the radio visibly switches pages
 
+# Current view (use after the override check)
+view = st.session_state.get("nav_view", NAV_OPTS[0])
 
 st.sidebar.markdown("### Plan controls")
 st.session_state.plan_locked = st.sidebar.checkbox(
