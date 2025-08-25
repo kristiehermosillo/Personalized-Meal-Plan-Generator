@@ -674,93 +674,154 @@ elif view == "Weekly Overview":
         df_shop2, pantry_items, annotate_at_bottom=annotate
     )
 
-    # ---------- Compact summary (per day) ----------
+    # ---------- Weekly Overview · Prep plan snapshot ----------
+
+    import re
+    from math import ceil
+    
+    def _norm(s: str) -> str:
+        return str(s or "").strip().lower()
+    
     def _short_kcal(n: int) -> str:
         return f"{n/1000:.1f}k" if n >= 1000 else str(n)
     
-    TOL_PCT = 10  # ±10%
-    target = int(st.session_state.get("calorie_target", 0)) if st.session_state.is_premium else None
-    restrict_tokens = set(normalize_tokens(allergies) + normalize_tokens(exclusions))
+    # --- 1) Prep load per day (rough) ---
+    def _estimate_recipe_minutes(rec: dict) -> tuple[int, int]:
+        """Return (estimated_minutes, steps_count). Use explicit '10 min' patterns if present,
+        otherwise ~3 min/step with a floor to avoid 0-minute recipes."""
+        steps = rec.get("steps") or []
+        txt = " ".join(_norm(s) for s in steps)
+        mins = 0
+        for m in re.findall(r"(\d+)\s*(?:min|mins|minute|minutes)\b", txt):
+            try:
+                mins += int(m)
+            except:
+                pass
+        if mins == 0:
+            mins = max(10, int(len(steps) * 3))
+        return mins, len(steps)
     
-    by_day = {d: df_plan2[df_plan2["day"] == d] for d in range(1, days + 1)}
-    chips = []
+    day_prep = []  # list of dicts: {day, mins, steps}
     for d in range(1, days + 1):
-        sub = by_day.get(d, pd.DataFrame())
-        kcal = int(sub["calories"].sum()) if not sub.empty else 0
+        mins = 0
+        steps = 0
+        for rec in plan.get(d, []):
+            if rec:
+                m, s = _estimate_recipe_minutes(rec)
+                mins += m
+                steps += s
+        day_prep.append({"day": d, "mins": mins, "steps": steps})
     
-        # calorie compliance
-        cal_ok = True
-        delta_txt = ""
-        if target:
-            tol = int(round(target * TOL_PCT / 100))
-            delta = kcal - target
-            cal_ok = abs(delta) <= tol
-            if not cal_ok:
-                sign = "+" if delta > 0 else ""
-                delta_txt = f" ({sign}{delta})"  # only show delta when outside tolerance
+    # light/medium/heavy labelling by thirds
+    sorted_by_mins = sorted(day_prep, key=lambda r: r["mins"])
+    chunk = max(1, ceil(len(sorted_by_mins)/3))
+    light_days  = {r["day"] for r in sorted_by_mins[:chunk]}
+    heavy_days  = {r["day"] for r in sorted_by_mins[-chunk:]}
+    for r in day_prep:
+        if r["day"] in heavy_days:
+            r["load"] = "heavy"
+        elif r["day"] in light_days:
+            r["load"] = "light"
+        else:
+            r["load"] = "medium"
     
-        # ingredient conflicts
-        conflicts = 0
-        if not sub.empty and restrict_tokens:
-            for _, row in sub.iterrows():
-                for rec in plan.get(d, []):
-                    if rec and rec.get("name", "") == row["recipe"]:
-                        ings = " ".join(str(i.get("item", "")).lower() for i in (rec.get("ingredients") or []))
-                        if any(tok and tok in ings for tok in restrict_tokens):
-                            conflicts += 1
+    # --- 2) “Batch once, chop list” (common veg across multiple days) ---
+    CHOP_ITEMS = [
+        "onion","garlic","bell pepper","pepper","carrot","celery","broccoli",
+        "cauliflower","tomato","cucumber","spinach","mushroom","cilantro",
+        "parsley","ginger","green onion","scallion","kale","zucchini"
+    ]
+    
+    def _qty_float(x):
+        try:
+            return float(x)
+        except:
+            return None
+    
+    chop_map = {}  # name -> {"days": set(), "totals": {unit: qty}}
+    for d in range(1, days + 1):
+        for rec in plan.get(d, []):
+            if not rec:
+                continue
+            for ing in rec.get("ingredients", []) or []:
+                name = _norm(ing.get("item",""))
+                hit = None
+                for token in CHOP_ITEMS:
+                    if token in name:
+                        hit = token
                         break
+                if not hit:
+                    continue
+                entry = chop_map.setdefault(hit, {"days": set(), "totals": {}})
+                entry["days"].add(d)
+                q = _qty_float(ing.get("qty"))
+                u = _norm(ing.get("unit",""))
+                if q is not None and u:
+                    entry["totals"][u] = entry["totals"].get(u, 0.0) + q
     
-        status = "ok" if (cal_ok and conflicts == 0) else ("warn" if conflicts == 0 else "bad")
-        bits = [f"Day {d}"]
-        bits.append(f"{_short_kcal(kcal)} kcal{delta_txt}")
-        if conflicts:
-            bits.append(f"{conflicts} conflict{'s' if conflicts != 1 else ''}")
+    batch_chop = []
+    for item, data in chop_map.items():
+        if len(data["days"]) >= 2:
+            # prefer the most common unit if we have totals
+            total_txt = ""
+            if data["totals"]:
+                unit, qty = max(data["totals"].items(), key=lambda kv: kv[1])
+                # round nicely (avoid .0 noise)
+                qty = int(qty) if abs(qty - int(qty)) < 1e-6 else round(qty, 1)
+                total_txt = f" · ~{qty} {unit}"
+            days_list = ", ".join(f"Day {d}" for d in sorted(data["days"]))
+            batch_chop.append(f"• {item.title()} on {days_list}{total_txt}")
     
-        chips.append((status, " • ".join(bits)))
+    # --- 3) “Cook once, reuse” (staples that appear on multiple days) ---
+    REUSE_ITEMS = [
+        "rice","quinoa","beans","lentils","chicken","tofu","pork","beef",
+        "sauce","dressing","marinade","hummus","pesto","salsa","roasted"
+    ]
+    reuse_map = {}  # token -> sorted list of days
+    for d in range(1, days + 1):
+        names = [_norm((rec or {}).get("name","")) for rec in plan.get(d, [])]
+        ings  = [_norm(i.get("item","")) for rec in plan.get(d, []) for i in (rec or {}).get("ingredients", []) or []]
+        haystack = " | ".join(names + ings)
+        for tok in REUSE_ITEMS:
+            if tok in haystack:
+                reuse_map.setdefault(tok, set()).add(d)
     
+    reuse_suggest = []
+    for tok, dset in reuse_map.items():
+        ds = sorted(dset)
+        if len(ds) >= 2:
+            first, rest = ds[0], ds[1:]
+            reuse_suggest.append(f"• Make extra **{tok}** on Day {first} → reuse on Day(s) {', '.join(map(str, rest))}")
+    
+    # --- 4) Make-ahead components (by recipe names/steps) ---
+    COMP_TOKS = ["sauce","dressing","marinade","pesto","salsa","slaw","hummus","vinaigrette"]
+    components = set()
+    for d in range(1, days + 1):
+        for rec in plan.get(d, []):
+            if not rec:
+                continue
+            name = _norm(rec.get("name",""))
+            step_blob = " ".join(_norm(s) for s in rec.get("steps", []) or [])
+            for tok in COMP_TOKS:
+                if tok in name or tok in step_blob:
+                    components.add(tok)
+    make_ahead = sorted(components)
+    
+    # --- Render ---
     st.caption(f"Showing {days} day(s) · {meals_per_day} meals/day · scaled for {hh_size} person(s)")
     
-    chip_html = []
-    for status, text in chips:
-        chip_html.append(f"<span class='chip {status}'><i class='dot'></i>{text}</span>")
+    st.markdown("### 🔧 Prep plan snapshot")
     
-    st.markdown(
-        """
-        <style>
-          .chiprow{
-            display:flex; flex-wrap:wrap; gap:10px; margin:8px 0 14px;
-          }
-          .chip{
-            display:inline-flex; align-items:center; gap:8px;
-            padding:6px 10px; border-radius:999px;
-            font-size:.95rem; line-height:1.1;
-            border:1px solid rgba(255,255,255,.14);
-            background:rgba(255,255,255,.04);
-          }
-          .chip .dot{
-            width:8px; height:8px; border-radius:50%;
-            display:inline-block; background:#8e8e8e;
-          }
-          .chip.ok{
-            border-color:rgba(46,204,113,.35);
-            background:rgba(46,204,113,.09);
-          }
-          .chip.ok .dot{ background:#2ecc71; }
-          .chip.warn{
-            border-color:rgba(241,196,15,.35);
-            background:rgba(241,196,15,.10);
-          }
-          .chip.warn .dot{ background:#f1c40f; }
-          .chip.bad{
-            border-color:rgba(231,76,60,.35);
-            background:rgba(231,76,60,.10);
-          }
-          .chip.bad .dot{ background:#e74c3c; }
-        </style>
-        <div class="chiprow">""" + "".join(chip_html) + "</div>",
-        unsafe_allow_html=True,
-    )
-    # ---------- end Compact summary ----------
+    c1, c2 = st.columns([0.55, 0.45], gap="large")
+    
+    with c1:
+        st.markdown("**Prep load by day**")
+        # simple visual bars relative to the heaviest day
+        ref = max(1, max(r["mins"] for r in day_prep))
+        for r in day_prep:
+            pct = int(round(100 * r["mins"] / ref))
+            label = "🟢 light" if r["load"] == "light" else ("🔴 heavy" if r["load"] == "heavy" else "🟡 me
+
 
     # Friendlier column names
     plan_display = df_plan2.rename(columns={
