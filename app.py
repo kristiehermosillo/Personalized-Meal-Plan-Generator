@@ -889,84 +889,62 @@ elif view == "Weekly Overview":
                 note_text = "Shopping List\n" + "\n".join(text_lines)
                 
                 st.markdown("#### 📋 Copy to your Notes app")
+                
+                # Visible copy button with a tiny toast
+                from streamlit.components.v1 import html as stc_html
+                import json as _json
+                _payload = _json.dumps(note_text)  # safely serialize for JS
+                
+                stc_html(f"""
+                <div style="display:flex;align-items:center;gap:10px;margin:6px 0 10px 0">
+                  <button id="copy_btn"
+                    style="padding:8px 12px;border-radius:8px;cursor:pointer;
+                           border:1px solid rgba(255,255,255,.15);
+                           background:#2b2b2b;color:inherit;">
+                    📋 Copy to clipboard
+                  </button>
+                  <span id="copy_msg" style="opacity:0;transition:opacity .2s;">Copied!</span>
+                </div>
+                <script>
+                (function(){{
+                  const txt = {_payload};
+                  const btn = document.getElementById("copy_btn");
+                  const msg = document.getElementById("copy_msg");
+                  function fallback(t){{
+                    const ta=document.createElement('textarea'); ta.value=t;
+                    ta.style.position='fixed'; ta.style.left='-9999px';
+                    document.body.appendChild(ta); ta.focus(); ta.select();
+                    try {{ document.execCommand('copy'); }} catch(e) {{}}
+                    document.body.removeChild(ta);
+                  }}
+                  if (btn){{
+                    btn.addEventListener('click', () => {{
+                      if (navigator.clipboard && window.isSecureContext){{
+                        navigator.clipboard.writeText(txt).catch(()=>fallback(txt));
+                      }} else {{
+                        fallback(txt);
+                      }}
+                      if (msg){{ msg.style.opacity=1; setTimeout(()=>msg.style.opacity=0, 1200); }}
+                    }});
+                  }}
+                }})();
+                </script>
+                """, height=50)
+                
+                # Keep the textarea for preview / manual edits
                 st.text_area(
-                    "Copy this list:",
-                    value=note_text,
-                    height=160,
-                    label_visibility="collapsed",
-                    key="shop_copy_text",  # unique key
+                    "Copy this list:", value=note_text, height=160,
+                    label_visibility="collapsed", key="shop_copy_text"
                 )
                 
-                # Render a self-contained "Copy to clipboard" button (no Streamlit event required)
-                from streamlit.components.v1 import html as _html
-                import json
-                
-                js_txt = json.dumps(note_text)  # what you want to copy
-                
-                _html("""
-                <style>
-                  .copy-wrap {{ display:flex; align-items:center; gap:10px; margin:8px 0 12px; position:relative; }}
-                
-                  /* Toast to the RIGHT of the button */
-                  .copy-toast {{
-                    position:absolute;
-                    left: calc(100% + 12px);
-                    top: 50%;
-                    transform: translateY(-50%) translateX(6px) scale(.98);
-                    z-index: 1000;
-                    white-space: nowrap;
-                    padding:8px 12px; border-radius:10px;
-                    background:linear-gradient(90deg,#22c55e,#16a34a);
-                    color:#0b1a0f; font-weight:700; letter-spacing:.2px;
-                    box-shadow:0 6px 18px rgba(0,0,0,.35);
-                    opacity:0; transition:opacity .18s ease, transform .18s ease;
-                    pointer-events:none;
-                  }}
-                  .copy-toast.show {{ opacity:1; transform: translateY(-50%) translateX(0) scale(1); }}
-                
-                  /* On phones, drop it below the button */
-                  @media (max-width: 560px){{
-                    .copy-toast {{
-                      left: 0; top: 48px;
-                      transform: translateY(6px) scale(.98);
-                    }}
-                    .copy-toast.show {{ transform: translateY(0) scale(1); }}
-                  }}
-                </style>
-                
-                <script>
-                  (function(){{
-                    const txt = {txt};
-                    function fallbackCopy(t) {{
-                      const ta = document.createElement('textarea');
-                      ta.value = t;
-                      ta.style.position = 'fixed';
-                      ta.style.left = '-9999px';
-                      document.body.appendChild(ta);
-                      ta.focus(); ta.select();
-                      try {{ document.execCommand('copy'); }} catch (e) {{}}
-                      document.body.removeChild(ta);
-                    }}
-                    try {{
-                      if (navigator.clipboard && window.isSecureContext) {{
-                        navigator.clipboard.writeText(txt).catch(() => fallbackCopy(txt));
-                      }} else {{
-                        fallbackCopy(txt);
-                      }}
-                    }} catch (e) {{
-                      fallbackCopy(txt);
-                    }}
-                    const toast = document.getElementById('copy_toast');
-                    if (toast) {{
-                      toast.classList.add('show');
-                      setTimeout(() => toast.classList.remove('show'), 1400);
-                    }}
-                  }})();
-                </script>
-                
-                <!-- This element renders right after your Streamlit button; absolute-positioned relative to this spot -->
-                <div class="copy-wrap"><div id="copy_toast" class="copy-toast">Copied!</div></div>
-                """.format(txt=js_txt), height=0)
+                # Keep the download as well
+                st.download_button(
+                    "Save as Note (.txt)",
+                    data=note_text.encode("utf-8"),
+                    file_name="Shopping List.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
 
                 
             # Pantry matches (unchanged)
@@ -987,26 +965,6 @@ elif view == "Weekly Overview":
                             "Unit":     st.column_config.TextColumn(width="small"),
                         },
                     )
-
-    with tab_totals:
-        day_summary = (
-            plan_display.groupby("Day")[["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]]
-            .sum()
-            .reset_index()
-            .sort_values("Day")
-        )
-        st.dataframe(
-            day_summary,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Day":         st.column_config.NumberColumn(format="%d", width="small"),
-                "Calories":    st.column_config.NumberColumn(format="%d", width="small"),
-                "Protein (g)": st.column_config.NumberColumn(format="%d", width="small"),
-                "Carbs (g)":   st.column_config.NumberColumn(format="%d", width="small"),
-                "Fat (g)":     st.column_config.NumberColumn(format="%d", width="small"),
-            },
-        )
 
         with tab_totals:
             day_summary = (
